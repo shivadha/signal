@@ -48,6 +48,14 @@ public static class DependencyInjection
         var aiProviderName = (configuration["AI_PROVIDER"] ?? "none").ToLowerInvariant();
         switch (aiProviderName)
         {
+            case "ollama":
+                services.AddHttpClient<OllamaAiProvider>();
+                services.AddScoped<IAIProvider, OllamaAiProvider>();
+                break;
+            case "gemini":
+                services.AddHttpClient<GeminiAiProvider>();
+                services.AddScoped<IAIProvider, GeminiAiProvider>();
+                break;
             case "none":
             default:
                 services.AddScoped<IAIProvider, NoneAiProvider>();
@@ -63,7 +71,10 @@ public static class DependencyInjection
         services.AddSingleton<IContentNormalizer, ContentNormalizationService>();
         services.AddScoped<IDuplicateDetector, DuplicateDetectionService>();
         services.AddScoped<SourceIngestionService>();
+        services.AddScoped<SignalScoringService>();
+        services.AddScoped<OpportunityDetectionService>();
 
         return services;
     }
 }
+
