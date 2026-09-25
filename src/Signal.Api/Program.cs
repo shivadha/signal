@@ -17,6 +17,13 @@ builder.Configuration.AddEnvironmentVariables();
 // Add Infrastructure & Application Services
 builder.Services.AddInfrastructure(builder.Configuration);
 
+var enableWorker = builder.Configuration["ENABLE_WORKER"]?.ToLowerInvariant() != "false";
+if (enableWorker)
+{
+    builder.Services.AddHostedService<Signal.Worker.Worker>();
+    builder.Services.AddHostedService<Signal.Worker.TelegramPollingService>();
+}
+
 builder.Services.AddEndpointsApiExplorer();
 
 var app = builder.Build();

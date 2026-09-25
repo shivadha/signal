@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: signal-bot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: DATABASE_CONNECTION_STRING
+        value: Data Source=/app/data/signal.db
+      - key: AI_PROVIDER
+        value: none
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: GOOGLE_SHEETS_ENABLED
+        value: false

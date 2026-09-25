@@ -88,6 +88,7 @@ public class SourceIngestionService
                     };
 
                     _dbContext.ContentItems.Add(contentItem);
+                    summary.NewItems.Add(contentItem);
                     summary.NewItemsSaved++;
                 }
 

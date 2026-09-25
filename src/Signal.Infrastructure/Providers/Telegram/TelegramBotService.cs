@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -88,41 +89,62 @@ public class TelegramBotService : ITelegramProvider
         CancellationToken cancellationToken = default)
     {
         var trimmed = commandText.Trim();
+        var isStart = trimmed.Equals("/start", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("start", StringComparison.OrdinalIgnoreCase);
+        var isHelp = trimmed.Equals("/help", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("help", StringComparison.OrdinalIgnoreCase);
+        var isToday = trimmed.Equals("/today", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("today", StringComparison.OrdinalIgnoreCase);
+        var isOffers = trimmed.Equals("/offers", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("offers", StringComparison.OrdinalIgnoreCase);
+        var isSaved = trimmed.Equals("/saved", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("saved", StringComparison.OrdinalIgnoreCase);
+        var isCheck = trimmed.StartsWith("/check", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("check ", StringComparison.OrdinalIgnoreCase);
+        var isRawUrl = trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
 
-        if (trimmed.StartsWith("/start", StringComparison.OrdinalIgnoreCase))
+        if (isStart)
         {
-            return "👋 <b>Welcome to SIGNAL</b>\n<i>Your personal information firewall. Signal over noise.</i>\n\n" +
+            return "👋 <b>Welcome to SIGNAL</b>\n" +
+                   "<i>Your personal information firewall. Signal over noise.</i>\n\n" +
+                   "🟢 <b>Status:</b> 24/7 Active\n" +
+                   "⏱️ <b>Auto-Sync:</b> Every 30 minutes across all days\n" +
+                   "📡 <b>Monitored:</b> OpenAI, Anthropic, Google, Hugging Face, GitHub, MIT Tech, YouTube\n\n" +
                    "<b>Available Commands:</b>\n" +
-                   "• /today — Discoveries from the last 24h\n" +
-                   "• /offers — Active verified developer opportunities\n" +
-                   "• /saved — Items approved or saved for later\n" +
-                   "• /check &lt;url&gt; — Verify link, detect duplicates & evaluate claims\n" +
-                   "• /help — Operational documentation";
+                   "• <code>/today</code> — Latest discoveries with summaries & links\n" +
+                   "• <code>/offers</code> — Free developer tiers, credits & discounts\n" +
+                   "• <code>/saved</code> — Items approved or saved to your library\n" +
+                   "• <code>/check &lt;url&gt;</code> — Verify link, detect duplicates & evaluate claims\n" +
+                   "• <code>/help</code> — Full operational documentation\n\n" +
+                   "💡 <i>Tip: You can send commands with or without the slash (e.g. <code>today</code> or <code>offers</code>).</i>";
         }
 
-        if (trimmed.StartsWith("/help", StringComparison.OrdinalIgnoreCase))
+        if (isHelp)
         {
-            return "📖 <b>SIGNAL Bot Commands</b>\n\n" +
-                   "• <code>/today</code> — High-signal curated news\n" +
+            return "📖 <b>SIGNAL Bot Commands & Operation</b>\n\n" +
+                   "• <code>/today</code> — High-signal curated news with summaries & links\n" +
                    "• <code>/offers</code> — Free tiers, API credits, developer discounts\n" +
                    "• <code>/saved</code> — Items saved in personal library\n" +
                    "• <code>/check &lt;url&gt;</code> — Paste any YouTube, Reel, or Article link\n\n" +
+                   "🔄 <b>Automatic Crawl:</b> Runs every 30 minutes, 24/7. When new high-signal items or opportunities are discovered, you receive an instant alert!\n\n" +
                    "💡 <i>Tip: Only when you tap <b>[✅ APPROVE & SAVE]</b> does an item write to Google Sheets.</i>";
         }
 
-        if (trimmed.StartsWith("/check", StringComparison.OrdinalIgnoreCase))
+        if (isCheck || isRawUrl)
         {
-            var parts = trimmed.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 2)
+            string url;
+            if (isRawUrl)
             {
-                return "⚠️ <b>Usage:</b> <code>/check &lt;url&gt;</code>\nExample: <code>/check https://openai.com/news/swarm/</code>";
+                url = trimmed;
+            }
+            else
+            {
+                var parts = trimmed.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2)
+                {
+                    return "⚠️ <b>Usage:</b> <code>/check &lt;url&gt;</code>\nExample: <code>/check https://openai.com/news/swarm/</code>";
+                }
+                url = parts[1].Trim();
             }
 
-            var url = parts[1].Trim();
             return await HandleCheckUrlAsync(url, db, cancellationToken);
         }
 
-        if (trimmed.StartsWith("/today", StringComparison.OrdinalIgnoreCase))
+        if (isToday)
         {
             var cutoff = DateTimeOffset.UtcNow.AddHours(-24);
             var items = await db.ContentItems
@@ -135,20 +157,46 @@ public class TelegramBotService : ITelegramProvider
 
             if (items.Count == 0)
             {
-                return "ℹ️ <b>SIGNAL — TODAY</b>\nNo new high-signal items discovered in the last 24h.";
+                // Fallback to top 5 most recent discoveries
+                items = await db.ContentItems
+                    .AsNoTracking()
+                    .Include(c => c.Source)
+                    .OrderByDescending(c => c.PublishedAt)
+                    .Take(5)
+                    .ToListAsync(cancellationToken);
+            }
+
+            if (items.Count == 0)
+            {
+                return "ℹ️ <b>SIGNAL — TODAY</b>\nNo discoveries recorded yet. Background sync is running every 30 minutes.";
             }
 
             var response = "🔥 <b>SIGNAL — TODAY (Top Discoveries)</b>\n\n";
             for (int i = 0; i < items.Count; i++)
             {
                 var it = items[i];
-                response += $"<b>{i + 1}. <a href=\"{it.Url}\">{it.Title}</a></b>\n" +
-                            $"   Source: {it.Source.Name} | Category: {it.Category}\n\n";
+                var excerpt = !string.IsNullOrWhiteSpace(it.Summary) ? it.Summary : it.TextContent;
+                if (!string.IsNullOrWhiteSpace(excerpt) && excerpt.Length > 220)
+                {
+                    excerpt = excerpt.Substring(0, 217) + "...";
+                }
+
+                var timeAgo = FormatRelativeTime(it.PublishedAt);
+
+                response += $"<b>{i + 1}. <a href=\"{it.Url}\">{WebUtility.HtmlEncode(it.Title)}</a></b>\n" +
+                            $"   🏢 <b>Source:</b> {WebUtility.HtmlEncode(it.Source.Name)} | 🕒 <i>{timeAgo}</i>\n" +
+                            $"   🏷️ <b>Category:</b> {WebUtility.HtmlEncode(it.Category ?? "General")}\n";
+
+                if (!string.IsNullOrWhiteSpace(excerpt))
+                {
+                    response += $"   📝 <b>Details:</b> <i>{WebUtility.HtmlEncode(excerpt)}</i>\n";
+                }
+                response += "\n";
             }
             return response;
         }
 
-        if (trimmed.StartsWith("/offers", StringComparison.OrdinalIgnoreCase))
+        if (isOffers)
         {
             var opportunities = await db.Opportunities
                 .AsNoTracking()
@@ -159,20 +207,23 @@ public class TelegramBotService : ITelegramProvider
 
             if (opportunities.Count == 0)
             {
-                return "💰 <b>OFFERS</b>\nNo pending unreviewed opportunities right now. All caught up!";
+                return "💰 <b>ACTIVE DEVELOPER OPPORTUNITIES</b>\nNo unreviewed opportunities in the queue right now. All caught up!\n\n<i>Auto-detection checks new feeds every 30 minutes.</i>";
             }
 
             var response = "💰 <b>ACTIVE DEVELOPER OPPORTUNITIES</b>\n\n";
-            foreach (var op in opportunities)
+            for (int i = 0; i < opportunities.Count; i++)
             {
-                response += $"• <b>{op.Title}</b>\n" +
-                            $"  Type: {op.OpportunityType} | Value: {op.Value ?? "Free"}\n" +
-                            $"  Status: {op.VerificationStatus}\n\n";
+                var op = opportunities[i];
+                response += $"<b>{i + 1}. {WebUtility.HtmlEncode(op.Title)}</b>\n" +
+                            $"   🎁 <b>Value:</b> {WebUtility.HtmlEncode(op.Value ?? "Free Tier")}\n" +
+                            $"   👥 <b>Eligibility:</b> {WebUtility.HtmlEncode(op.Eligibility ?? "All developers")}\n" +
+                            $"   ⏳ <b>Expires:</b> {(op.ExpiryDate.HasValue ? op.ExpiryDate.Value.ToString("dd MMM yyyy") : "Ongoing")}\n" +
+                            $"   🔗 <a href=\"{op.OfficialSourceUrl ?? "https://github.com/shivadha/signal"}\">Official Link</a>\n\n";
             }
             return response;
         }
 
-        if (trimmed.StartsWith("/saved", StringComparison.OrdinalIgnoreCase))
+        if (isSaved)
         {
             var saved = await db.Opportunities
                 .AsNoTracking()
@@ -183,20 +234,31 @@ public class TelegramBotService : ITelegramProvider
 
             if (saved.Count == 0)
             {
-                return "⭐ <b>SAVED LIBRARY</b>\nYou have not approved or saved any items yet.";
+                return "⭐ <b>SAVED LIBRARY</b>\nYou have not approved or saved any items yet.\n\n<i>When you tap [✅ APPROVE & SAVE] or [⭐ SAVE LATER] on any alert, it appears here and syncs to Google Sheets.</i>";
             }
 
             var response = "⭐ <b>YOUR SAVED LIBRARY</b>\n\n";
             foreach (var op in saved)
             {
-                response += $"• <b>{op.Title}</b> ({op.Status})\n" +
+                response += $"• <b>{WebUtility.HtmlEncode(op.Title)}</b> ({op.Status})\n" +
                             $"  URL: {op.OfficialSourceUrl ?? "N/A"}\n\n";
             }
             return response;
         }
 
-        return "❓ Unknown command. Type <code>/help</code> for available commands.";
+        return "❓ Unknown command. Type <code>/help</code> or <code>help</code> for available commands, or paste any URL to check it.";
     }
+
+    private static string FormatRelativeTime(DateTimeOffset dt)
+    {
+        var diff = DateTimeOffset.UtcNow - dt;
+        if (diff.TotalMinutes < 1) return "Just now";
+        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
+        if (diff.TotalDays < 7) return $"{(int)diff.TotalDays}d ago";
+        return dt.ToString("dd MMM yyyy");
+    }
+
 
     private async Task<string> HandleCheckUrlAsync(string url, ISignalDbContext db, CancellationToken ct)
     {

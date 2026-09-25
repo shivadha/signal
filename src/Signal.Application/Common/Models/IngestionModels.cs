@@ -1,3 +1,5 @@
+using Signal.Domain.Entities;
+
 namespace Signal.Application.Common.Models;
 
 public record RawContentItem
@@ -25,7 +27,9 @@ public record IngestionSummary
     public int ItemsDiscovered { get; set; }
     public int NewItemsSaved { get; set; }
     public int DuplicatesFiltered { get; set; }
+    public List<ContentItem> NewItems { get; set; } = new();
     public List<string> Errors { get; set; } = new();
 }
 
 public record GoogleSheetSyncResult(bool Success, int? RowIndex, string? ErrorMessage);
+
