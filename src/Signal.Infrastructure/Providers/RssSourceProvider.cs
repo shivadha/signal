@@ -35,7 +35,7 @@ public class RssSourceProvider : ISourceProvider
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, targetUrl);
-            request.Headers.Add("User-Agent", "Signal-Platform/1.0 (+https://github.com/shivadha/signal)");
+            request.Headers.TryAddWithoutValidation("User-Agent", "SignalBot/1.0 (by /u/signal_bot; +https://github.com/shivadha/signal)");
 
             using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();

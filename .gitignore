@@ -18,8 +18,8 @@ obj/
 *.db-wal
 *.sqlite
 *.sqlite3
-data/
-app_data/
+/data/
+/app_data/
 
 ## Logs
 *.log
