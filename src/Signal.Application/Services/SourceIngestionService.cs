@@ -99,6 +99,7 @@ public class SourceIngestionService
                         Language = raw.Language ?? "en",
                         Category = raw.Category ?? source.Category,
                         Summary = finalSummary,
+                        ImageUrl = raw.ImageUrl,
                         IsDuplicate = false
                     };
 

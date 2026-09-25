@@ -12,6 +12,7 @@ public record RawContentItem
     public string? Summary { get; init; }
     public string Language { get; init; } = "en";
     public string? Category { get; init; }
+    public string? ImageUrl { get; init; }
 }
 
 public record DuplicateCheckResult

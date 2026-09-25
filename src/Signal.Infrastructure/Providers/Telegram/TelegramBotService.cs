@@ -59,6 +59,12 @@ public class TelegramBotService : ITelegramProvider
     public async Task<bool> SendOpportunityCardAsync(Opportunity opportunity, CancellationToken cancellationToken = default)
     {
         var text = FormatOpportunityHtml(opportunity);
+        var imageUrl = opportunity.ContentItem?.ImageUrl;
+        if (!string.IsNullOrWhiteSpace(imageUrl))
+        {
+            text = $"<a href=\"{imageUrl}\">&#8205;</a>" + text;
+        }
+
         var keyboard = new TelegramInlineKeyboardMarkup
         {
             InlineKeyboard = new List<List<TelegramInlineKeyboardButton>>
@@ -91,11 +97,15 @@ public class TelegramBotService : ITelegramProvider
 
     public async Task<bool> SendToolCardAsync(ContentItem item, CancellationToken cancellationToken = default)
     {
-        var text = $"🛠️ <b>NEW DEVELOPER TOOL / REPOSITORY</b>\n\n" +
+        var imagePrefix = !string.IsNullOrWhiteSpace(item.ImageUrl)
+            ? $"<a href=\"{item.ImageUrl}\">&#8205;</a>"
+            : string.Empty;
+
+        var text = $"{imagePrefix}🛠️ <b>NEW DEVELOPER TOOL / REPOSITORY</b>\n\n" +
                    $"<b><a href=\"{item.Url}\">{WebUtility.HtmlEncode(item.Title)}</a></b>\n\n" +
                    $"📍 <b>Platform:</b> {WebUtility.HtmlEncode(item.Platform)}\n" +
                    $"🏷️ <b>Category:</b> {WebUtility.HtmlEncode(item.Category ?? "Developer Tools")}\n\n" +
-                   $"<b>Why Useful:</b>\n" +
+                   $"💡 <b>What it is & Why Useful:</b>\n" +
                    $"{WebUtility.HtmlEncode(item.Summary ?? item.TextContent ?? "Productivity accelerator.")}";
 
         var keyboard = new TelegramInlineKeyboardMarkup
@@ -532,6 +542,7 @@ public class TelegramBotService : ITelegramProvider
                 Category = inspection.IsLegit ? "Verified Video / Tool" : "Suspicious Content",
                 Summary = inspection.Summary,
                 TextContent = inspection.Transcript,
+                ImageUrl = inspection.ImageUrl,
                 DiscoveredAt = DateTimeOffset.UtcNow,
                 PublishedAt = DateTimeOffset.UtcNow,
                 ContentHash = _normalizer.ComputeContentHash(inspection.Title, inspection.Transcript ?? ""),
@@ -544,8 +555,11 @@ public class TelegramBotService : ITelegramProvider
         }
 
         var badge = inspection.LegitimacyVerdict.Contains("LEGITIMATE") ? "🟢" : (inspection.LegitimacyVerdict.Contains("DANGEROUS") ? "🔴" : "🟡");
+        var imagePrefix = !string.IsNullOrWhiteSpace(inspection.ImageUrl)
+            ? $"<a href=\"{inspection.ImageUrl}\">&#8205;</a>"
+            : string.Empty;
 
-        var card = $"{badge} <b>SIGNAL VIDEO & LINK VERIFICATION</b>\n\n" +
+        var card = $"{imagePrefix}{badge} <b>SIGNAL VIDEO & LINK VERIFICATION</b>\n\n" +
                    $"<b><a href=\"{url}\">{WebUtility.HtmlEncode(inspection.Title)}</a></b>\n" +
                    $"📍 <b>Platform:</b> {inspection.Platform} | 👤 <b>Creator:</b> {WebUtility.HtmlEncode(inspection.Author ?? "Unknown")}\n\n" +
                    $"🛡️ <b>Legitimacy Verdict:</b> <b>{inspection.LegitimacyVerdict}</b> ({inspection.Confidence * 100:F0}% confidence)\n" +

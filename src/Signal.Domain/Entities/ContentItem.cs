@@ -18,6 +18,7 @@ public class ContentItem
     public string Language { get; set; } = "en";
     public string? Category { get; set; }
     public string? Summary { get; set; }
+    public string? ImageUrl { get; set; }
 
     public bool IsDuplicate { get; set; } = false;
     public Guid? DuplicateOfId { get; set; }

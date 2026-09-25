@@ -73,6 +73,41 @@ public class RssSourceProvider : ISourceProvider
                 var author = item.Authors.FirstOrDefault()?.Name
                              ?? item.Authors.FirstOrDefault()?.Email;
 
+                string? imageUrl = item.Links.FirstOrDefault(l => l.RelationshipType == "enclosure" && (l.MediaType?.StartsWith("image/") == true || l.Uri?.ToString().EndsWith(".jpg") == true || l.Uri?.ToString().EndsWith(".png") == true))?.Uri?.ToString();
+
+                if (string.IsNullOrEmpty(imageUrl))
+                {
+                    try
+                    {
+                        foreach (var ext in item.ElementExtensions)
+                        {
+                            if (ext.OuterName is "thumbnail" or "content")
+                            {
+                                var elem = ext.GetObject<System.Xml.Linq.XElement>();
+                                var attr = elem.Attribute("url")?.Value;
+                                if (!string.IsNullOrEmpty(attr))
+                                {
+                                    imageUrl = attr;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore XML extension extraction failures
+                    }
+                }
+
+                if (string.IsNullOrEmpty(imageUrl) && !string.IsNullOrEmpty(summary ?? content))
+                {
+                    var match = System.Text.RegularExpressions.Regex.Match(summary ?? content ?? "", @"<img\s+[^>]*?src=[""']([^""']+)[""']", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (match.Success)
+                    {
+                        imageUrl = match.Groups[1].Value;
+                    }
+                }
+
                 results.Add(new RawContentItem
                 {
                     Title = title,
@@ -82,7 +117,8 @@ public class RssSourceProvider : ISourceProvider
                     Summary = summary,
                     TextContent = content ?? summary,
                     Language = source.Language,
-                    Category = source.Category
+                    Category = source.Category,
+                    ImageUrl = imageUrl
                 });
             }
         }

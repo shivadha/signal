@@ -70,7 +70,8 @@ public class YouTubeSourceProvider : ISourceProvider
                         Summary = description,
                         TextContent = description,
                         Language = source.Language,
-                        Category = "Video / AI"
+                        Category = "Video / AI",
+                        ImageUrl = !string.IsNullOrEmpty(videoId) ? $"https://img.youtube.com/vi/{videoId}/hqdefault.jpg" : null
                     });
                 }
             }

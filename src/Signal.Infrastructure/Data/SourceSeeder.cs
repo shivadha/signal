@@ -10,6 +10,15 @@ public static class SourceSeeder
 {
     public static async Task SeedAsync(SignalDbContext context, ILogger logger)
     {
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync("ALTER TABLE ContentItems ADD COLUMN ImageUrl TEXT;");
+        }
+        catch
+        {
+            // Column already exists
+        }
+
         var defaultSources = new List<Source>
         {
             new()

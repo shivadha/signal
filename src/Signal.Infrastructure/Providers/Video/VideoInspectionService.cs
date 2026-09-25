@@ -99,13 +99,13 @@ public class VideoInspectionService : IVideoInspectionService
             _logger.LogWarning(ex, "Failed to parse YouTube page for {VideoId}", videoId);
         }
 
-        // Fallback transcript synthesis if captions are disabled
         if (string.IsNullOrWhiteSpace(transcript))
         {
             transcript = GenerateSynthesizedTranscript(title, author, description);
         }
 
-        return EvaluateLegitimacy(url, "YouTube", title, author, description, transcript);
+        var imageUrl = !string.IsNullOrEmpty(videoId) ? $"https://img.youtube.com/vi/{videoId}/hqdefault.jpg" : null;
+        return EvaluateLegitimacy(url, "YouTube", title, author, description, transcript, imageUrl);
     }
 
     private async Task<string> ExtractYouTubeCaptionsAsync(string html, string videoId, CancellationToken ct)
@@ -187,7 +187,7 @@ public class VideoInspectionService : IVideoInspectionService
         string description = string.Empty;
         string transcript = string.Empty;
 
-        // 1. Attempt Instagram oEmbed
+        string? imageUrl = null;
         try
         {
             var oEmbedUrl = $"https://api.instagram.com/oembed?url={Uri.EscapeDataString(url)}";
@@ -197,6 +197,7 @@ public class VideoInspectionService : IVideoInspectionService
                 var doc = await resp.Content.ReadFromJsonAsync<JsonElement>(ct);
                 if (doc.TryGetProperty("title", out var t)) title = t.GetString() ?? title;
                 if (doc.TryGetProperty("author_name", out var a)) author = a.GetString() ?? author;
+                if (doc.TryGetProperty("thumbnail_url", out var th)) imageUrl = th.GetString();
             }
         }
         catch (Exception ex)
@@ -226,6 +227,12 @@ public class VideoInspectionService : IVideoInspectionService
                 {
                     title = WebUtility.HtmlDecode(ogTitle.Groups[1].Value);
                 }
+
+                var ogImg = Regex.Match(html, @"<meta\s+property=""og:image""\s+content=""([^""]*)""", RegexOptions.IgnoreCase);
+                if (ogImg.Success && string.IsNullOrEmpty(imageUrl))
+                {
+                    imageUrl = WebUtility.HtmlDecode(ogImg.Groups[1].Value);
+                }
             }
         }
         catch (Exception ex)
@@ -243,7 +250,7 @@ public class VideoInspectionService : IVideoInspectionService
                      $"Content: {description}\n" +
                      $"Target Link / Action: Check bio / link in profile.";
 
-        return EvaluateLegitimacy(url, "Instagram", title, author, description, transcript);
+        return EvaluateLegitimacy(url, "Instagram", title, author, description, transcript, imageUrl);
     }
 
     private async Task<VideoInspectionResult> InspectGenericWebPageAsync(string url, CancellationToken ct)
@@ -251,7 +258,7 @@ public class VideoInspectionService : IVideoInspectionService
         string title = "Web Page";
         string description = string.Empty;
         string author = "Publisher";
-
+        string? imageUrl = null;
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -267,6 +274,9 @@ public class VideoInspectionService : IVideoInspectionService
 
                 var descMatch = Regex.Match(html, @"<meta\s+(?:name|property)=""(?:description|og:description)""\s+content=""([^""]*)""", RegexOptions.IgnoreCase);
                 if (descMatch.Success) description = WebUtility.HtmlDecode(descMatch.Groups[1].Value.Trim());
+
+                var imgMatch = Regex.Match(html, @"<meta\s+(?:property|name)=""(?:og:image|twitter:image)""\s+content=""([^""]*)""", RegexOptions.IgnoreCase);
+                if (imgMatch.Success) imageUrl = WebUtility.HtmlDecode(imgMatch.Groups[1].Value.Trim());
             }
         }
         catch (Exception ex)
@@ -275,7 +285,7 @@ public class VideoInspectionService : IVideoInspectionService
         }
 
         var transcript = $"[Web Content Extract]\nTitle: {title}\nSummary: {description}";
-        return EvaluateLegitimacy(url, "Web", title, author, description, transcript);
+        return EvaluateLegitimacy(url, "Web", title, author, description, transcript, imageUrl);
     }
 
     private static string GenerateSynthesizedTranscript(string title, string author, string description)
@@ -301,7 +311,8 @@ public class VideoInspectionService : IVideoInspectionService
         string title,
         string author,
         string description,
-        string transcript)
+        string transcript,
+        string? imageUrl = null)
     {
         var text = $"{title} {description} {transcript}".ToLowerInvariant();
 
@@ -416,7 +427,8 @@ public class VideoInspectionService : IVideoInspectionService
             Claims = claims,
             RiskFactors = riskFactors,
             SafeRecommendation = recommendation,
-            OfficialAlternativeUrl = officialUrl
+            OfficialAlternativeUrl = officialUrl,
+            ImageUrl = imageUrl
         };
     }
 

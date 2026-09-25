@@ -16,6 +16,7 @@ public record VideoInspectionResult
     public List<string> RiskFactors { get; init; } = new();
     public string? SafeRecommendation { get; init; }
     public string? OfficialAlternativeUrl { get; init; }
+    public string? ImageUrl { get; init; }
 }
 
 public interface IVideoInspectionService

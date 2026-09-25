@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -141,43 +142,125 @@ public class Worker : BackgroundService
             }
         }
 
-        // 3. Dispatch High-Signal Digest for remaining non-opportunity discoveries
-        var nonOppItems = newItems
+        // 3. Dispatch Topic-Segregated Digest for remaining discoveries
+        var remainingItems = newItems
             .Where(it => !handledItemIds.Contains(it.Id))
             .OrderByDescending(it => it.PublishedAt)
-            .Take(5)
             .ToList();
 
-        if (nonOppItems.Count > 0)
+        if (remainingItems.Count > 0)
         {
+            var aiNews = remainingItems.Where(it => IsAiNews(it)).Take(3).ToList();
+            var aiItemIds = new HashSet<Guid>(aiNews.Select(x => x.Id));
+
+            var toolsAndSoftware = remainingItems.Where(it => !aiItemIds.Contains(it.Id) && IsSoftwareOrTool(it)).Take(3).ToList();
+            var toolItemIds = new HashSet<Guid>(toolsAndSoftware.Select(x => x.Id));
+
+            var freebiesAndDeals = remainingItems.Where(it => !aiItemIds.Contains(it.Id) && !toolItemIds.Contains(it.Id) && IsFreebieOrDeal(it)).Take(3).ToList();
+            var freebieItemIds = new HashSet<Guid>(freebiesAndDeals.Select(x => x.Id));
+
+            var generalTech = remainingItems.Where(it => !aiItemIds.Contains(it.Id) && !toolItemIds.Contains(it.Id) && !freebieItemIds.Contains(it.Id)).Take(3).ToList();
+
+            // Find first item with image for rich banner preview
+            var bannerImage = remainingItems.FirstOrDefault(it => !string.IsNullOrWhiteSpace(it.ImageUrl))?.ImageUrl;
+            var imagePrefix = !string.IsNullOrWhiteSpace(bannerImage) ? $"<a href=\"{bannerImage}\">&#8205;</a>" : string.Empty;
+
             var header = _isFirstRun
-                ? "📡 <b>SIGNAL — STARTUP INTELLIGENCE BRIEFING</b>\n" +
-                  $"<i>Ingested {newItems.Count} new item(s). Showing top {nonOppItems.Count} discoveries:</i>\n\n"
-                : "📡 <b>SIGNAL — 30-MINUTE DISCOVERY UPDATE</b>\n" +
+                ? $"{imagePrefix}📡 <b>SIGNAL — STARTUP INTELLIGENCE BRIEFING</b>\n" +
+                  $"<i>Ingested {newItems.Count} new item(s). Segregated by topic with brief context:</i>\n\n"
+                : $"{imagePrefix}📡 <b>SIGNAL — 30-MINUTE DISCOVERY UPDATE</b>\n" +
                   $"<i>Found {newItems.Count} new update(s) in this 30-minute pass:</i>\n\n";
 
-            var message = header;
-            for (int i = 0; i < nonOppItems.Count; i++)
+            var sb = new StringBuilder(header);
+
+            if (aiNews.Count > 0)
             {
-                var it = nonOppItems[i];
-                var excerpt = !string.IsNullOrWhiteSpace(it.Summary) ? it.Summary : it.TextContent;
-                if (!string.IsNullOrWhiteSpace(excerpt) && excerpt.Length > 180)
+                sb.AppendLine("🤖 <b>AI RESEARCH & FRONTIER NEWS</b>");
+                foreach (var it in aiNews)
                 {
-                    excerpt = excerpt.Substring(0, 177) + "...";
+                    AppendItemDetails(sb, it);
                 }
+                sb.AppendLine();
+            }
 
-                message += $"<b>{i + 1}. <a href=\"{it.Url}\">{WebUtility.HtmlEncode(it.Title)}</a></b>\n" +
-                           $"   📍 <i>{WebUtility.HtmlEncode(it.Platform)}</i> | 🏷️ <i>{WebUtility.HtmlEncode(it.Category ?? "General")}</i>\n";
-
-                if (!string.IsNullOrWhiteSpace(excerpt))
+            if (toolsAndSoftware.Count > 0)
+            {
+                sb.AppendLine("🛠️ <b>SOFTWARE & DEVELOPER TOOLS</b>");
+                foreach (var it in toolsAndSoftware)
                 {
-                    message += $"   📝 <i>{WebUtility.HtmlEncode(excerpt)}</i>\n";
+                    AppendItemDetails(sb, it);
                 }
-                message += "\n";
+                sb.AppendLine();
+            }
+
+            if (freebiesAndDeals.Count > 0)
+            {
+                sb.AppendLine("🎁 <b>FREEBIES, DEALS & SUBSCRIPTIONS</b>");
+                foreach (var it in freebiesAndDeals)
+                {
+                    AppendItemDetails(sb, it);
+                }
+                sb.AppendLine();
+            }
+
+            if (generalTech.Count > 0)
+            {
+                sb.AppendLine("📰 <b>TECH ECOSYSTEM & INNOVATION</b>");
+                foreach (var it in generalTech)
+                {
+                    AppendItemDetails(sb, it);
+                }
+                sb.AppendLine();
+            }
+
+            var message = sb.ToString();
+            if (message.Length > 3900)
+            {
+                message = message[..3890] + "...";
             }
 
             await botService.SendAlertAsync(message, ct);
         }
+    }
+
+    private static void AppendItemDetails(StringBuilder sb, ContentItem it)
+    {
+        var briefContext = !string.IsNullOrWhiteSpace(it.Summary) ? it.Summary : it.TextContent;
+        if (!string.IsNullOrWhiteSpace(briefContext) && briefContext.Length > 160)
+        {
+            briefContext = briefContext[..157] + "...";
+        }
+
+        sb.AppendLine($"• <b><a href=\"{it.Url}\">{WebUtility.HtmlEncode(it.Title)}</a></b>");
+        sb.AppendLine($"  📍 <i>{WebUtility.HtmlEncode(it.Platform)}</i> | 🏷️ <i>{WebUtility.HtmlEncode(it.Category ?? "Tech")}</i>");
+        if (!string.IsNullOrWhiteSpace(briefContext))
+        {
+            sb.AppendLine($"  💡 <i>{WebUtility.HtmlEncode(briefContext)}</i>");
+        }
+    }
+
+    private static bool IsAiNews(ContentItem it)
+    {
+        var text = $"{it.Title} {it.Category} {it.Summary}".ToLowerInvariant();
+        return text.Contains("ai") || text.Contains("llm") || text.Contains("model") || text.Contains("openai")
+            || text.Contains("anthropic") || text.Contains("deepseek") || text.Contains("qwen")
+            || text.Contains("gpt") || text.Contains("gemini") || text.Contains("claude");
+    }
+
+    private static bool IsSoftwareOrTool(ContentItem it)
+    {
+        var text = $"{it.Title} {it.Category} {it.Url}".ToLowerInvariant();
+        return it.Url.Contains("github.com") || it.Platform == "GitHub" || text.Contains("tool")
+            || text.Contains("software") || text.Contains("cli") || text.Contains("library")
+            || text.Contains("open-source") || text.Contains("framework");
+    }
+
+    private static bool IsFreebieOrDeal(ContentItem it)
+    {
+        var text = $"{it.Title} {it.Category}".ToLowerInvariant();
+        return text.Contains("free") || text.Contains("deal") || text.Contains("discount")
+            || text.Contains("credit") || text.Contains("grant") || text.Contains("trial")
+            || text.Contains("freebies");
     }
 }
 
