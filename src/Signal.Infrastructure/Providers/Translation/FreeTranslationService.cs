@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -11,6 +12,8 @@ public class FreeTranslationService : ITranslationService
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<FreeTranslationService> _logger;
+
+    private readonly ConcurrentDictionary<string, string> _cache = new();
 
     // Detect CJK (Chinese, Japanese, Korean) characters
     private static readonly Regex CjkRegex = new(@"[\u4e00-\u9fa5\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]", RegexOptions.Compiled);
@@ -38,6 +41,11 @@ public class FreeTranslationService : ITranslationService
             return text;
         }
 
+        if (_cache.TryGetValue(text, out var cached))
+        {
+            return cached;
+        }
+
         try
         {
             // Truncate to safe length for query string if extremely long
@@ -52,7 +60,29 @@ public class FreeTranslationService : ITranslationService
             using var response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Translation API returned status {Status}. Returning original text.", response.StatusCode);
+                // Fallback to MyMemory Free Translation API if primary rate-limited
+                var fallbackLang = sl == "auto" ? "zh" : sl;
+                var fallbackUrl = $"https://api.mymemory.translated.net/get?q={encoded}&langpair={fallbackLang}|en";
+                using var fbReq = new HttpRequestMessage(HttpMethod.Get, fallbackUrl);
+                fbReq.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0");
+                using var fbResp = await _httpClient.SendAsync(fbReq, cancellationToken);
+                if (fbResp.IsSuccessStatusCode)
+                {
+                    var fbJson = await fbResp.Content.ReadAsStringAsync(cancellationToken);
+                    using var fbDoc = JsonDocument.Parse(fbJson);
+                    if (fbDoc.RootElement.TryGetProperty("responseData", out var respData) &&
+                        respData.TryGetProperty("translatedText", out var transText))
+                    {
+                        var fbResult = transText.GetString();
+                        if (!string.IsNullOrWhiteSpace(fbResult) && !fbResult.StartsWith("MYMEMORY WARNING"))
+                        {
+                            _cache[text] = fbResult;
+                            return fbResult;
+                        }
+                    }
+                }
+
+                _logger.LogDebug("Translation API returned status {Status}. Returning original text.", response.StatusCode);
                 return text;
             }
 
@@ -81,6 +111,7 @@ public class FreeTranslationService : ITranslationService
                     var translated = sb.ToString();
                     if (!string.IsNullOrWhiteSpace(translated))
                     {
+                        _cache[text] = translated;
                         return translated;
                     }
                 }

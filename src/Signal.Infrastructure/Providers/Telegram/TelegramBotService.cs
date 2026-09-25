@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -276,13 +277,13 @@ public class TelegramBotService : ITelegramProvider
 
         if (isToday)
         {
-            var cutoff = DateTimeOffset.UtcNow.AddHours(-24);
+            var cutoff = DateTimeOffset.UtcNow.AddHours(-36);
             var items = await db.ContentItems
                 .AsNoTracking()
                 .Include(c => c.Source)
                 .Where(c => c.PublishedAt >= cutoff)
                 .OrderByDescending(c => c.PublishedAt)
-                .Take(5)
+                .Take(25)
                 .ToListAsync(cancellationToken);
 
             if (items.Count == 0)
@@ -291,7 +292,7 @@ public class TelegramBotService : ITelegramProvider
                     .AsNoTracking()
                     .Include(c => c.Source)
                     .OrderByDescending(c => c.PublishedAt)
-                    .Take(5)
+                    .Take(25)
                     .ToListAsync(cancellationToken);
             }
 
@@ -300,35 +301,77 @@ public class TelegramBotService : ITelegramProvider
                 return "ℹ️ <b>SIGNAL — TODAY</b>\nNo discoveries recorded yet. Background sync is running every 30 minutes.";
             }
 
-            var response = "🔥 <b>SIGNAL — TODAY (Top Discoveries)</b>\n\n";
-            for (int i = 0; i < items.Count; i++)
+            var aiNews = items.Where(it => IsAiItem(it)).Take(3).ToList();
+            var aiItemIds = new HashSet<Guid>(aiNews.Select(x => x.Id));
+
+            var tools = items.Where(it => !aiItemIds.Contains(it.Id) && IsSoftwareItem(it)).Take(3).ToList();
+            var toolItemIds = new HashSet<Guid>(tools.Select(x => x.Id));
+
+            var freebies = items.Where(it => !aiItemIds.Contains(it.Id) && !toolItemIds.Contains(it.Id) && IsFreebieItem(it)).Take(3).ToList();
+            var freebieItemIds = new HashSet<Guid>(freebies.Select(x => x.Id));
+
+            var ecosystem = items.Where(it => !aiItemIds.Contains(it.Id) && !toolItemIds.Contains(it.Id) && !freebieItemIds.Contains(it.Id)).Take(3).ToList();
+
+            var banner = items.FirstOrDefault(it => !string.IsNullOrWhiteSpace(it.ImageUrl))?.ImageUrl;
+            var bannerPrefix = !string.IsNullOrWhiteSpace(banner) ? $"<a href=\"{banner}\">&#8205;</a>" : string.Empty;
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"{bannerPrefix}🔥 <b>SIGNAL — TODAY'S CURATED INTELLIGENCE</b>");
+            sb.AppendLine("<i>Segregated by topic with brief explanatory context:</i>\n");
+
+            if (aiNews.Count > 0)
             {
-                var it = items[i];
-                var excerpt = !string.IsNullOrWhiteSpace(it.Summary) ? it.Summary : it.TextContent;
-                if (!string.IsNullOrWhiteSpace(excerpt) && excerpt.Length > 220)
+                sb.AppendLine("🤖 <b>AI NEWS & OFFERS</b>");
+                foreach (var it in aiNews)
                 {
-                    excerpt = excerpt.Substring(0, 217) + "...";
+                    AppendDigestItem(sb, it);
                 }
-
-                var timeAgo = FormatRelativeTime(it.PublishedAt);
-
-                response += $"<b>{i + 1}. <a href=\"{it.Url}\">{WebUtility.HtmlEncode(it.Title)}</a></b>\n" +
-                            $"   🏢 <b>Source:</b> {WebUtility.HtmlEncode(it.Source?.Name ?? it.Platform)} | 🕒 <i>{timeAgo}</i>\n" +
-                            $"   🏷️ <b>Category:</b> {WebUtility.HtmlEncode(it.Category ?? "General")}\n";
-
-                if (!string.IsNullOrWhiteSpace(excerpt))
-                {
-                    response += $"   📝 <b>Details:</b> <i>{WebUtility.HtmlEncode(excerpt)}</i>\n";
-                }
-                response += "\n";
+                sb.AppendLine();
             }
-            return response;
+
+            if (tools.Count > 0)
+            {
+                sb.AppendLine("🛠️ <b>SOFTWARE & DEVELOPER TOOLS</b>");
+                foreach (var it in tools)
+                {
+                    AppendDigestItem(sb, it);
+                }
+                sb.AppendLine();
+            }
+
+            if (freebies.Count > 0)
+            {
+                sb.AppendLine("🎁 <b>FREEBIES & DEALS</b>");
+                foreach (var it in freebies)
+                {
+                    AppendDigestItem(sb, it);
+                }
+                sb.AppendLine();
+            }
+
+            if (ecosystem.Count > 0)
+            {
+                sb.AppendLine("📰 <b>TECH ECOSYSTEM & INNOVATION</b>");
+                foreach (var it in ecosystem)
+                {
+                    AppendDigestItem(sb, it);
+                }
+                sb.AppendLine();
+            }
+
+            var resp = sb.ToString();
+            if (resp.Length > 3900)
+            {
+                resp = resp[..3890] + "...";
+            }
+            return resp;
         }
 
         if (isOffers)
         {
             var opportunities = await db.Opportunities
                 .AsNoTracking()
+                .Include(o => o.ContentItem)
                 .Where(o => o.Status != OpportunityStatus.Expired && o.Status != OpportunityStatus.Rejected)
                 .OrderByDescending(o => o.CreatedAt)
                 .Take(5)
@@ -339,11 +382,16 @@ public class TelegramBotService : ITelegramProvider
                 return "💰 <b>ACTIVE DEVELOPER OPPORTUNITIES & CREDITS</b>\nNo unreviewed opportunities in the queue right now. All caught up!\n\n<i>Auto-detection checks new feeds every 30 minutes for Claude, OpenAI, Gemini, Muse, Cursor, and open-source grants.</i>";
             }
 
-            var response = "💰 <b>ACTIVE DEVELOPER OPPORTUNITIES & CREDITS</b>\n\n";
+            var banner = opportunities.FirstOrDefault(o => !string.IsNullOrWhiteSpace(o.ContentItem?.ImageUrl))?.ContentItem?.ImageUrl;
+            var bannerPrefix = !string.IsNullOrWhiteSpace(banner) ? $"<a href=\"{banner}\">&#8205;</a>" : string.Empty;
+
+            var response = $"{bannerPrefix}💰 <b>ACTIVE DEVELOPER OPPORTUNITIES & CREDITS</b>\n\n";
             for (int i = 0; i < opportunities.Count; i++)
             {
                 var op = opportunities[i];
-                response += $"<b>{i + 1}. {WebUtility.HtmlEncode(op.Title)}</b>\n" +
+                var imgTag = !string.IsNullOrWhiteSpace(op.ContentItem?.ImageUrl) ? $" • <a href=\"{op.ContentItem.ImageUrl}\">🖼️ Preview</a>" : "";
+
+                response += $"<b>{i + 1}. {WebUtility.HtmlEncode(op.Title)}</b>{imgTag}\n" +
                             $"   🎁 <b>Value / Grant:</b> {WebUtility.HtmlEncode(op.Value ?? "Free Tier / Credits")}\n" +
                             $"   👥 <b>Eligibility:</b> {WebUtility.HtmlEncode(op.Eligibility ?? "All developers")}\n" +
                             $"   ⏳ <b>Expires:</b> {(op.ExpiryDate.HasValue ? op.ExpiryDate.Value.ToString("dd MMM yyyy") : "Ongoing")}\n" +
@@ -373,7 +421,10 @@ public class TelegramBotService : ITelegramProvider
                 return "🛠️ <b>DEVELOPER TOOLS & GITHUB REPOSITORIES</b>\nNo tools recorded yet. Background monitoring is actively scanning feeds!";
             }
 
-            var response = "🛠️ <b>NEW DEVELOPER TOOLS & GITHUB REPOSITORIES</b>\n" +
+            var banner = tools.FirstOrDefault(t => !string.IsNullOrWhiteSpace(t.ImageUrl))?.ImageUrl;
+            var bannerPrefix = !string.IsNullOrWhiteSpace(banner) ? $"<a href=\"{banner}\">&#8205;</a>" : string.Empty;
+
+            var response = $"{bannerPrefix}🛠️ <b>NEW DEVELOPER TOOLS & GITHUB REPOSITORIES</b>\n" +
                            "<i>Trending open-source AI utilities, CLI tools & productivity accelerators:</i>\n\n";
 
             for (int i = 0; i < tools.Count; i++)
@@ -384,8 +435,9 @@ public class TelegramBotService : ITelegramProvider
                     desc = desc.Substring(0, 197) + "...";
 
                 var timeAgo = FormatRelativeTime(t.PublishedAt);
+                var imgTag = !string.IsNullOrWhiteSpace(t.ImageUrl) ? $" • <a href=\"{t.ImageUrl}\">🖼️ Preview</a>" : "";
 
-                response += $"<b>{i + 1}. <a href=\"{t.Url}\">{WebUtility.HtmlEncode(t.Title)}</a></b>\n" +
+                response += $"<b>{i + 1}. <a href=\"{t.Url}\">{WebUtility.HtmlEncode(t.Title)}</a></b>{imgTag}\n" +
                             $"   🏷️ <b>Category:</b> {WebUtility.HtmlEncode(t.Category ?? "Developer Tool")} | 🕒 <i>{timeAgo}</i>\n";
 
                 if (!string.IsNullOrWhiteSpace(desc))
@@ -423,7 +475,10 @@ public class TelegramBotService : ITelegramProvider
                 return "🌏 <b>GLOBAL AI INTELLIGENCE (CN / JP / US)</b>\nNo international items indexed yet. Crawlers are fetching Chinese & Japanese feeds on the 30-minute interval.";
             }
 
-            var response = "🌏 <b>GLOBAL AI INTELLIGENCE (CN / JP / US)</b>\n" +
+            var banner = globalItems.FirstOrDefault(g => !string.IsNullOrWhiteSpace(g.ImageUrl))?.ImageUrl;
+            var bannerPrefix = !string.IsNullOrWhiteSpace(banner) ? $"<a href=\"{banner}\">&#8205;</a>" : string.Empty;
+
+            var response = $"{bannerPrefix}🌏 <b>GLOBAL AI INTELLIGENCE (CN / JP / US)</b>\n" +
                            "<i>Latest international releases, auto-translated to English:</i>\n\n";
 
             for (int i = 0; i < globalItems.Count; i++)
@@ -441,8 +496,9 @@ public class TelegramBotService : ITelegramProvider
                     desc = desc.Substring(0, 197) + "...";
 
                 var timeAgo = FormatRelativeTime(g.PublishedAt);
+                var imgTag = !string.IsNullOrWhiteSpace(g.ImageUrl) ? $" • <a href=\"{g.ImageUrl}\">🖼️ Preview</a>" : "";
 
-                response += $"<b>{i + 1}. {flag} <a href=\"{g.Url}\">{WebUtility.HtmlEncode(g.Title)}</a></b>\n" +
+                response += $"<b>{i + 1}. {flag} <a href=\"{g.Url}\">{WebUtility.HtmlEncode(g.Title)}</a></b>{imgTag}\n" +
                             $"   🏢 <b>Source:</b> {WebUtility.HtmlEncode(g.Source?.Name ?? g.Platform)} | 🕒 <i>{timeAgo}</i>\n";
 
                 if (!string.IsNullOrWhiteSpace(desc))
@@ -789,6 +845,47 @@ public class TelegramBotService : ITelegramProvider
             default:
                 return "Action processed.";
         }
+    }
+
+    private static void AppendDigestItem(StringBuilder sb, ContentItem it)
+    {
+        var briefContext = !string.IsNullOrWhiteSpace(it.Summary) ? it.Summary : it.TextContent;
+        if (!string.IsNullOrWhiteSpace(briefContext) && briefContext.Length > 160)
+        {
+            briefContext = briefContext[..157] + "...";
+        }
+
+        var imageTag = !string.IsNullOrWhiteSpace(it.ImageUrl) ? $" • <a href=\"{it.ImageUrl}\">🖼️ Preview</a>" : "";
+        sb.AppendLine($"• <b><a href=\"{it.Url}\">{WebUtility.HtmlEncode(it.Title)}</a></b>{imageTag}");
+        sb.AppendLine($"  📍 <i>{WebUtility.HtmlEncode(it.Source?.Name ?? it.Platform)}</i> | 🏷️ <i>{WebUtility.HtmlEncode(it.Category ?? "General")}</i>");
+        if (!string.IsNullOrWhiteSpace(briefContext))
+        {
+            sb.AppendLine($"  💡 <i>{WebUtility.HtmlEncode(briefContext)}</i>");
+        }
+    }
+
+    private static bool IsAiItem(ContentItem it)
+    {
+        var text = $"{it.Title} {it.Category} {it.Summary}".ToLowerInvariant();
+        return text.Contains("ai") || text.Contains("llm") || text.Contains("model") || text.Contains("openai")
+            || text.Contains("anthropic") || text.Contains("deepseek") || text.Contains("qwen")
+            || text.Contains("gpt") || text.Contains("gemini") || text.Contains("claude");
+    }
+
+    private static bool IsSoftwareItem(ContentItem it)
+    {
+        var text = $"{it.Title} {it.Category} {it.Url}".ToLowerInvariant();
+        return it.Url.Contains("github.com") || it.Platform == "GitHub" || text.Contains("tool")
+            || text.Contains("software") || text.Contains("cli") || text.Contains("library")
+            || text.Contains("open-source") || text.Contains("framework");
+    }
+
+    private static bool IsFreebieItem(ContentItem it)
+    {
+        var text = $"{it.Title} {it.Category}".ToLowerInvariant();
+        return text.Contains("free") || text.Contains("deal") || text.Contains("discount")
+            || text.Contains("credit") || text.Contains("grant") || text.Contains("trial")
+            || text.Contains("freebies");
     }
 }
 

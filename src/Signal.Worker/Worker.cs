@@ -175,7 +175,7 @@ public class Worker : BackgroundService
 
             if (aiNews.Count > 0)
             {
-                sb.AppendLine("🤖 <b>AI RESEARCH & FRONTIER NEWS</b>");
+                sb.AppendLine("🤖 <b>AI NEWS & OFFERS</b>");
                 foreach (var it in aiNews)
                 {
                     AppendItemDetails(sb, it);
@@ -195,7 +195,7 @@ public class Worker : BackgroundService
 
             if (freebiesAndDeals.Count > 0)
             {
-                sb.AppendLine("🎁 <b>FREEBIES, DEALS & SUBSCRIPTIONS</b>");
+                sb.AppendLine("🎁 <b>FREEBIES & DEALS</b>");
                 foreach (var it in freebiesAndDeals)
                 {
                     AppendItemDetails(sb, it);
@@ -231,7 +231,8 @@ public class Worker : BackgroundService
             briefContext = briefContext[..157] + "...";
         }
 
-        sb.AppendLine($"• <b><a href=\"{it.Url}\">{WebUtility.HtmlEncode(it.Title)}</a></b>");
+        var imageTag = !string.IsNullOrWhiteSpace(it.ImageUrl) ? $" • <a href=\"{it.ImageUrl}\">🖼️ Preview</a>" : "";
+        sb.AppendLine($"• <b><a href=\"{it.Url}\">{WebUtility.HtmlEncode(it.Title)}</a></b>{imageTag}");
         sb.AppendLine($"  📍 <i>{WebUtility.HtmlEncode(it.Platform)}</i> | 🏷️ <i>{WebUtility.HtmlEncode(it.Category ?? "Tech")}</i>");
         if (!string.IsNullOrWhiteSpace(briefContext))
         {

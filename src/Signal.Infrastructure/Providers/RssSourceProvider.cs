@@ -48,78 +48,117 @@ public class RssSourceProvider : ISourceProvider
                 MaxCharactersInDocument = 10_000_000
             };
 
-            using var xmlReader = XmlReader.Create(stream, settings);
-            var feed = SyndicationFeed.Load(xmlReader);
-
-            if (feed == null)
+            SyndicationFeed? feed = null;
+            try
             {
-                return results;
+                using var xmlReader = XmlReader.Create(stream, settings);
+                feed = SyndicationFeed.Load(xmlReader);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "SyndicationFeed.Load failed for {TargetUrl}, attempting XDocument fallback parser.", targetUrl);
             }
 
-            foreach (var item in feed.Items)
+            if (feed != null)
             {
-                var link = item.Links.FirstOrDefault()?.Uri?.ToString() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(link))
-                    continue;
-
-                var title = item.Title?.Text ?? string.Empty;
-                var summary = item.Summary?.Text;
-                var content = (item.Content as TextSyndicationContent)?.Text;
-
-                var publishedDate = item.PublishDate != DateTimeOffset.MinValue
-                    ? item.PublishDate
-                    : (item.LastUpdatedTime != DateTimeOffset.MinValue ? item.LastUpdatedTime : DateTimeOffset.UtcNow);
-
-                var author = item.Authors.FirstOrDefault()?.Name
-                             ?? item.Authors.FirstOrDefault()?.Email;
-
-                string? imageUrl = item.Links.FirstOrDefault(l => l.RelationshipType == "enclosure" && (l.MediaType?.StartsWith("image/") == true || l.Uri?.ToString().EndsWith(".jpg") == true || l.Uri?.ToString().EndsWith(".png") == true))?.Uri?.ToString();
-
-                if (string.IsNullOrEmpty(imageUrl))
+                foreach (var item in feed.Items)
                 {
-                    try
+                    var link = item.Links.FirstOrDefault()?.Uri?.ToString() ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(link))
+                        continue;
+
+                    var title = item.Title?.Text ?? string.Empty;
+                    var summary = item.Summary?.Text;
+                    var content = (item.Content as TextSyndicationContent)?.Text;
+
+                    var publishedDate = item.PublishDate != DateTimeOffset.MinValue
+                        ? item.PublishDate
+                        : (item.LastUpdatedTime != DateTimeOffset.MinValue ? item.LastUpdatedTime : DateTimeOffset.UtcNow);
+
+                    var author = item.Authors.FirstOrDefault()?.Name
+                                 ?? item.Authors.FirstOrDefault()?.Email;
+
+                    string? imageUrl = item.Links.FirstOrDefault(l => l.RelationshipType == "enclosure" && (l.MediaType?.StartsWith("image/") == true || l.Uri?.ToString().EndsWith(".jpg") == true || l.Uri?.ToString().EndsWith(".png") == true))?.Uri?.ToString();
+
+                    if (string.IsNullOrEmpty(imageUrl))
                     {
-                        foreach (var ext in item.ElementExtensions)
+                        try
                         {
-                            if (ext.OuterName is "thumbnail" or "content")
+                            foreach (var ext in item.ElementExtensions)
                             {
-                                var elem = ext.GetObject<System.Xml.Linq.XElement>();
-                                var attr = elem.Attribute("url")?.Value;
-                                if (!string.IsNullOrEmpty(attr))
+                                if (ext.OuterName is "thumbnail" or "content")
                                 {
-                                    imageUrl = attr;
-                                    break;
+                                    var elem = ext.GetObject<System.Xml.Linq.XElement>();
+                                    var attr = elem.Attribute("url")?.Value;
+                                    if (!string.IsNullOrEmpty(attr))
+                                    {
+                                        imageUrl = attr;
+                                        break;
+                                    }
                                 }
                             }
                         }
+                        catch
+                        {
+                            // Ignore XML extension extraction failures
+                        }
                     }
-                    catch
-                    {
-                        // Ignore XML extension extraction failures
-                    }
-                }
 
-                if (string.IsNullOrEmpty(imageUrl) && !string.IsNullOrEmpty(summary ?? content))
-                {
-                    var match = System.Text.RegularExpressions.Regex.Match(summary ?? content ?? "", @"<img\s+[^>]*?src=[""']([^""']+)[""']", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                    if (match.Success)
+                    if (string.IsNullOrEmpty(imageUrl) && !string.IsNullOrEmpty(summary ?? content))
                     {
-                        imageUrl = match.Groups[1].Value;
+                        var match = System.Text.RegularExpressions.Regex.Match(summary ?? content ?? "", @"<img\s+[^>]*?src=[""']([^""']+)[""']", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (match.Success)
+                        {
+                            imageUrl = match.Groups[1].Value;
+                        }
                     }
-                }
 
-                results.Add(new RawContentItem
+                    results.Add(new RawContentItem
+                    {
+                        Title = title,
+                        Url = link,
+                        Author = author,
+                        PublishedAt = publishedDate,
+                        Summary = summary,
+                        TextContent = content ?? summary,
+                        Language = source.Language,
+                        Category = source.Category,
+                        ImageUrl = imageUrl
+                    });
+                }
+            }
+            else
+            {
+                // Fallback XML parsing for RDF (RSS 1.0) and non-standard Atom
+                stream.Position = 0;
+                var xdoc = System.Xml.Linq.XDocument.Load(stream);
+                var items = xdoc.Descendants().Where(e => e.Name.LocalName is "item" or "entry");
+                foreach (var el in items)
                 {
-                    Title = title,
-                    Url = link,
-                    Author = author,
-                    PublishedAt = publishedDate,
-                    Summary = summary,
-                    TextContent = content ?? summary,
-                    Language = source.Language,
-                    Category = source.Category,
-                    ImageUrl = imageUrl
-                });
+                    var link = el.Elements().FirstOrDefault(e => e.Name.LocalName == "link")?.Attribute("href")?.Value
+                               ?? el.Elements().FirstOrDefault(e => e.Name.LocalName == "link")?.Value;
+                    if (string.IsNullOrWhiteSpace(link)) continue;
+
+                    var title = el.Elements().FirstOrDefault(e => e.Name.LocalName == "title")?.Value ?? string.Empty;
+                    var summary = el.Elements().FirstOrDefault(e => e.Name.LocalName is "description" or "summary" or "content")?.Value;
+                    var dateStr = el.Elements().FirstOrDefault(e => e.Name.LocalName is "pubDate" or "date" or "published" or "updated")?.Value;
+                    var published = DateTimeOffset.TryParse(dateStr, out var d) ? d : DateTimeOffset.UtcNow;
+
+                    var imgMatch = System.Text.RegularExpressions.Regex.Match(summary ?? "", @"<img\s+[^>]*?src=[""']([^""']+)[""']", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    var img = imgMatch.Success ? imgMatch.Groups[1].Value : null;
+
+                    results.Add(new RawContentItem
+                    {
+                        Title = title,
+                        Url = link,
+                        PublishedAt = published,
+                        Summary = summary,
+                        TextContent = summary,
+                        Language = source.Language,
+                        Category = source.Category,
+                        ImageUrl = img
+                    });
+                }
             }
         }
         catch (Exception ex)
