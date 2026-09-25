@@ -17,6 +17,8 @@ public record VideoInspectionResult
     public string? SafeRecommendation { get; init; }
     public string? OfficialAlternativeUrl { get; init; }
     public string? ImageUrl { get; init; }
+    public string? ExtractedGitHubUrl { get; init; }
+    public string? ExtractedTopic { get; init; }
 }
 
 public interface IVideoInspectionService

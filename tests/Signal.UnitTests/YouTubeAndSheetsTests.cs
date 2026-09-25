@@ -94,6 +94,18 @@ public class YouTubeAndSheetsTests : IDisposable
         Assert.Contains("Claude Pro Free Trial", queuedRecord.PayloadJson);
     }
 
+    [Fact]
+    public async Task InspectUrlAsync_DirectGitHubRepo_ExtractsGitUrlAndDetectsTopic()
+    {
+        var service = new Signal.Infrastructure.Providers.Video.VideoInspectionService(new HttpClient(), NullLogger<Signal.Infrastructure.Providers.Video.VideoInspectionService>.Instance);
+        var result = await service.InspectUrlAsync("https://github.com/vllm-project/vllm");
+
+        Assert.Equal("https://github.com/vllm-project/vllm", result.ExtractedGitHubUrl);
+        Assert.NotNull(result.ExtractedTopic);
+        Assert.True(result.IsLegit);
+        Assert.Equal("GitHub", result.Platform);
+    }
+
     public void Dispose()
     {
         _dbContext.Dispose();

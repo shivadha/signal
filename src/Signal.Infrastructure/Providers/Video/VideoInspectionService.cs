@@ -22,6 +22,10 @@ public class VideoInspectionService : IVideoInspectionService
         @"instagram\.com\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex GitHubRepoRegex = new(
+        @"https?://(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     public VideoInspectionService(HttpClient httpClient, ILogger<VideoInspectionService> logger)
     {
         _httpClient = httpClient;
@@ -71,7 +75,7 @@ public class VideoInspectionService : IVideoInspectionService
             _logger.LogDebug(ex, "oEmbed fetch failed for YouTube video {VideoId}", videoId);
         }
 
-        // 2. Fetch page HTML to extract description & caption track
+        string? pageHtml = null;
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, $"https://www.youtube.com/watch?v={videoId}");
@@ -82,6 +86,7 @@ public class VideoInspectionService : IVideoInspectionService
             if (resp.IsSuccessStatusCode)
             {
                 var html = await resp.Content.ReadAsStringAsync(ct);
+                pageHtml = html;
 
                 // Extract description from meta tag
                 var descMatch = Regex.Match(html, @"<meta\s+name=""description""\s+content=""([^""]*)""", RegexOptions.IgnoreCase);
@@ -105,7 +110,7 @@ public class VideoInspectionService : IVideoInspectionService
         }
 
         var imageUrl = !string.IsNullOrEmpty(videoId) ? $"https://img.youtube.com/vi/{videoId}/hqdefault.jpg" : null;
-        return EvaluateLegitimacy(url, "YouTube", title, author, description, transcript, imageUrl);
+        return EvaluateLegitimacy(url, "YouTube", title, author, description, transcript, imageUrl, pageHtml);
     }
 
     private async Task<string> ExtractYouTubeCaptionsAsync(string html, string videoId, CancellationToken ct)
@@ -206,6 +211,7 @@ public class VideoInspectionService : IVideoInspectionService
         }
 
         // 2. Fetch OpenGraph and Page Content
+        string? pageHtml = null;
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -215,6 +221,7 @@ public class VideoInspectionService : IVideoInspectionService
             if (resp.IsSuccessStatusCode)
             {
                 var html = await resp.Content.ReadAsStringAsync(ct);
+                pageHtml = html;
 
                 var ogDesc = Regex.Match(html, @"<meta\s+property=""og:description""\s+content=""([^""]*)""", RegexOptions.IgnoreCase);
                 if (ogDesc.Success)
@@ -250,15 +257,31 @@ public class VideoInspectionService : IVideoInspectionService
                      $"Content: {description}\n" +
                      $"Target Link / Action: Check bio / link in profile.";
 
-        return EvaluateLegitimacy(url, "Instagram", title, author, description, transcript, imageUrl);
+        return EvaluateLegitimacy(url, "Instagram", title, author, description, transcript, imageUrl, pageHtml);
     }
 
     private async Task<VideoInspectionResult> InspectGenericWebPageAsync(string url, CancellationToken ct)
     {
+        string platform = "Web";
         string title = "Web Page";
         string description = string.Empty;
         string author = "Publisher";
         string? imageUrl = null;
+        string? pageHtml = null;
+
+        // Direct GitHub repository inspection
+        if (url.Contains("github.com"))
+        {
+            platform = "GitHub";
+            var ghMatch = GitHubRepoRegex.Match(url);
+            if (ghMatch.Success && !IsBlacklistedGitHubPath(ghMatch.Groups[1].Value, ghMatch.Groups[2].Value))
+            {
+                title = $"{ghMatch.Groups[1].Value}/{ghMatch.Groups[2].Value}";
+                author = ghMatch.Groups[1].Value;
+                description = $"Open-source repository by @{author}.";
+            }
+        }
+
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
@@ -268,15 +291,19 @@ public class VideoInspectionService : IVideoInspectionService
             if (resp.IsSuccessStatusCode)
             {
                 var html = await resp.Content.ReadAsStringAsync(ct);
+                pageHtml = html;
 
                 var titleMatch = Regex.Match(html, @"<title>([^<]*)</title>", RegexOptions.IgnoreCase);
-                if (titleMatch.Success) title = WebUtility.HtmlDecode(titleMatch.Groups[1].Value.Trim());
+                if (titleMatch.Success && !string.IsNullOrWhiteSpace(titleMatch.Groups[1].Value))
+                    title = WebUtility.HtmlDecode(titleMatch.Groups[1].Value.Trim());
 
                 var descMatch = Regex.Match(html, @"<meta\s+(?:name|property)=""(?:description|og:description)""\s+content=""([^""]*)""", RegexOptions.IgnoreCase);
-                if (descMatch.Success) description = WebUtility.HtmlDecode(descMatch.Groups[1].Value.Trim());
+                if (descMatch.Success && !string.IsNullOrWhiteSpace(descMatch.Groups[1].Value))
+                    description = WebUtility.HtmlDecode(descMatch.Groups[1].Value.Trim());
 
                 var imgMatch = Regex.Match(html, @"<meta\s+(?:property|name)=""(?:og:image|twitter:image)""\s+content=""([^""]*)""", RegexOptions.IgnoreCase);
-                if (imgMatch.Success) imageUrl = WebUtility.HtmlDecode(imgMatch.Groups[1].Value.Trim());
+                if (imgMatch.Success && !string.IsNullOrWhiteSpace(imgMatch.Groups[1].Value))
+                    imageUrl = WebUtility.HtmlDecode(imgMatch.Groups[1].Value.Trim());
             }
         }
         catch (Exception ex)
@@ -285,7 +312,7 @@ public class VideoInspectionService : IVideoInspectionService
         }
 
         var transcript = $"[Web Content Extract]\nTitle: {title}\nSummary: {description}";
-        return EvaluateLegitimacy(url, "Web", title, author, description, transcript, imageUrl);
+        return EvaluateLegitimacy(url, platform, title, author, description, transcript, imageUrl, pageHtml);
     }
 
     private static string GenerateSynthesizedTranscript(string title, string author, string description)
@@ -312,13 +339,25 @@ public class VideoInspectionService : IVideoInspectionService
         string author,
         string description,
         string transcript,
-        string? imageUrl = null)
+        string? imageUrl = null,
+        string? rawHtml = null)
     {
         var text = $"{title} {description} {transcript}".ToLowerInvariant();
 
         var claims = new List<string>();
         var riskFactors = new List<string>();
         string? officialUrl = null;
+
+        // 0. Extract GitHub Repository if present
+        var extractedGitUrl = ExtractGitHubRepoUrl(text, rawHtml, url);
+        if (!string.IsNullOrWhiteSpace(extractedGitUrl))
+        {
+            claims.Add($"Discovered GitHub Repository: {extractedGitUrl}");
+            officialUrl = extractedGitUrl;
+        }
+
+        // Detect Topic stated by the creator / author
+        var topic = DetectTopic(title, description, transcript, url, extractedGitUrl);
 
         // 1. Analyze Common Scam & Clickbait Flags
         if (text.Contains("bypass") && (text.Contains("limit") || text.Contains("token") || text.Contains("paywall")))
@@ -349,32 +388,26 @@ public class VideoInspectionService : IVideoInspectionService
         }
 
         // 2. Analyze Legitimacy Boosters
-        bool hasOfficialLink = false;
-        if (text.Contains("github.com/"))
-        {
-            claims.Add("Provides open-source GitHub repository");
-            hasOfficialLink = true;
-            officialUrl = ExtractFirstUrl(text, "github.com");
-        }
+        bool hasOfficialLink = !string.IsNullOrWhiteSpace(extractedGitUrl);
         if (text.Contains("anthropic.com") || text.Contains("claude.ai"))
         {
             hasOfficialLink = true;
-            officialUrl = "https://www.anthropic.com";
+            officialUrl ??= "https://www.anthropic.com";
         }
         if (text.Contains("openai.com"))
         {
             hasOfficialLink = true;
-            officialUrl = "https://openai.com";
+            officialUrl ??= "https://openai.com";
         }
         if (text.Contains("deepseek.com"))
         {
             hasOfficialLink = true;
-            officialUrl = "https://www.deepseek.com";
+            officialUrl ??= "https://www.deepseek.com";
         }
         if (text.Contains("huggingface.co"))
         {
             hasOfficialLink = true;
-            officialUrl = ExtractFirstUrl(text, "huggingface.co") ?? "https://huggingface.co";
+            officialUrl ??= ExtractFirstUrl(text, "huggingface.co") ?? "https://huggingface.co";
         }
 
         // 3. Determine Verdict & Confidence
@@ -402,7 +435,9 @@ public class VideoInspectionService : IVideoInspectionService
             isLegit = true;
             verdict = "🟢 LEGITIMATE & VERIFIED";
             confidence = 0.92;
-            recommendation = "Tool / technique references verifiable official repositories or documentation. Safe to explore.";
+            recommendation = !string.IsNullOrWhiteSpace(extractedGitUrl)
+                ? $"Verified open-source repository found: {extractedGitUrl}. Safe to inspect code and explore."
+                : "Tool / technique references verifiable official repositories or documentation. Safe to explore.";
         }
         else
         {
@@ -428,8 +463,111 @@ public class VideoInspectionService : IVideoInspectionService
             RiskFactors = riskFactors,
             SafeRecommendation = recommendation,
             OfficialAlternativeUrl = officialUrl,
-            ImageUrl = imageUrl
+            ImageUrl = imageUrl,
+            ExtractedGitHubUrl = extractedGitUrl,
+            ExtractedTopic = topic
         };
+    }
+
+    private static string? ExtractGitHubRepoUrl(string text, string? html = null, string? originalUrl = null)
+    {
+        // 1. If originalUrl is already a GitHub repo:
+        if (!string.IsNullOrEmpty(originalUrl) && originalUrl.Contains("github.com"))
+        {
+            var matchSelf = GitHubRepoRegex.Match(originalUrl);
+            if (matchSelf.Success && !IsBlacklistedGitHubPath(matchSelf.Groups[1].Value, matchSelf.Groups[2].Value))
+            {
+                return $"https://github.com/{matchSelf.Groups[1].Value}/{matchSelf.Groups[2].Value.TrimEnd('/', '.', ')')}";
+            }
+        }
+
+        // 2. Search in HTML links <a href="https://github.com/...">
+        if (!string.IsNullOrEmpty(html))
+        {
+            var hrefMatches = Regex.Matches(html, @"href=[""'](https?://(?:www\.)?github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+[^""']*)[""']", RegexOptions.IgnoreCase);
+            foreach (Match m in hrefMatches)
+            {
+                var repoMatch = GitHubRepoRegex.Match(m.Groups[1].Value);
+                if (repoMatch.Success && !IsBlacklistedGitHubPath(repoMatch.Groups[1].Value, repoMatch.Groups[2].Value))
+                {
+                    return $"https://github.com/{repoMatch.Groups[1].Value}/{repoMatch.Groups[2].Value.TrimEnd('/', '.', ')')}";
+                }
+            }
+        }
+
+        // 3. Search in description / transcript / text
+        var match = GitHubRepoRegex.Match(text);
+        if (match.Success && !IsBlacklistedGitHubPath(match.Groups[1].Value, match.Groups[2].Value))
+        {
+            return $"https://github.com/{match.Groups[1].Value}/{match.Groups[2].Value.TrimEnd('/', '.', ')')}";
+        }
+
+        return null;
+    }
+
+    private static bool IsBlacklistedGitHubPath(string owner, string repo)
+    {
+        var lowerOwner = owner.ToLowerInvariant();
+        var lowerRepo = repo.ToLowerInvariant().TrimEnd('/', '.');
+        string[] reserved = ["features", "pricing", "about", "contact", "login", "signup", "settings", "explore", "trending", "topics", "pulls", "issues", "site"];
+        return reserved.Contains(lowerOwner) || reserved.Contains(lowerRepo);
+    }
+
+    private static string DetectTopic(string title, string description, string transcript, string url, string? gitUrl)
+    {
+        var text = $"{title} {description} {transcript} {url} {gitUrl}".ToLowerInvariant();
+
+        // 1. Coding Assistants & IDEs
+        if (text.Contains("cursor") || text.Contains("copilot") || text.Contains("cline") || text.Contains("continue.dev") || text.Contains("aider") || text.Contains("code assistant") || text.Contains("ai coding") || text.Contains("coding agent"))
+            return "AI Coding Assistants & Autonomous Dev Agents";
+
+        // 2. Local LLMs & Inference
+        if (text.Contains("ollama") || text.Contains("vllm") || text.Contains("gguf") || text.Contains("llama.cpp") || text.Contains("local llm") || text.Contains("quantization") || text.Contains("fine-tuning") || text.Contains("lora"))
+            return "Local LLM Inference & Model Fine-Tuning";
+
+        // 3. Frontier AI & LLM Releases
+        if (text.Contains("deepseek") || text.Contains("qwen") || text.Contains("claude 3.5") || text.Contains("gpt-4") || text.Contains("gpt-5") || text.Contains("gemini 1.5") || text.Contains("gemini 2") || text.Contains("openai o1") || text.Contains("o3-mini"))
+            return "Frontier LLM Releases & Architecture";
+
+        // 4. Voice, Speech & Audio
+        if (text.Contains("whisper") || text.Contains("elevenlabs") || text.Contains("text-to-speech") || text.Contains("voice clone") || text.Contains("audio transcript") || text.Contains("speech-to-text") || text.Contains("tts"))
+            return "Voice AI, Speech Synthesis & Audio Processing";
+
+        // 5. Image & Video Generation
+        if (text.Contains("stable diffusion") || text.Contains("comfyui") || text.Contains("flux") || text.Contains("midjourney") || text.Contains("sora") || text.Contains("kling") || text.Contains("runway") || text.Contains("image generation") || text.Contains("video generation"))
+            return "Generative Media (Image & Video Synthesis)";
+
+        // 6. Web Scraping & Crawling
+        if (text.Contains("crawl4ai") || text.Contains("scrape") || text.Contains("scraping") || text.Contains("crawler") || text.Contains("playwright") || text.Contains("puppeteer") || text.Contains("selenium"))
+            return "Web Scraping, Headless Automation & Crawlers";
+
+        // 7. Developer Tooling & CLI
+        if (text.Contains("cli tool") || text.Contains("terminal") || text.Contains("docker") || text.Contains("kubernetes") || text.Contains("git repo") || text.Contains("github tool") || text.Contains("open-source library") || (gitUrl != null && !text.Contains("ai")))
+            return "Developer CLI & Open-Source Utilities";
+
+        // 8. API Gateways & Token Management
+        if (text.Contains("litellm") || text.Contains("one-api") || text.Contains("api proxy") || text.Contains("rate limit") || text.Contains("reverse proxy") || text.Contains("token pool"))
+            return "API Gateways, Token Management & Reverse Proxies";
+
+        // 9. Free Credits & Perks
+        if (text.Contains("free credit") || text.Contains("api grant") || text.Contains("free trial") || text.Contains("startup discount") || text.Contains("free tier") || text.Contains("giveaway"))
+            return "Developer Free Credits, API Grants & Discounts";
+
+        // 10. RAG & Vector Databases
+        if (text.Contains("rag") || text.Contains("retrieval augmented") || text.Contains("vector database") || text.Contains("pinecone") || text.Contains("chromadb") || text.Contains("qdrant") || text.Contains("langchain") || text.Contains("llamaindex"))
+            return "RAG Pipelines & Vector Database Systems";
+
+        // Fallback: Clean and format title as headline topic
+        var cleanTitle = title
+            .Replace("YouTube", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("Video", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("Instagram", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("Reel", "", StringComparison.OrdinalIgnoreCase)
+            .Trim(' ', '-', '|', '•');
+
+        return !string.IsNullOrWhiteSpace(cleanTitle) && cleanTitle.Length > 4
+            ? cleanTitle
+            : "Tech & Software Discovery";
     }
 
     private static string? ExtractFirstUrl(string text, string domain)

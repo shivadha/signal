@@ -565,8 +565,16 @@ public class TelegramBotService : ITelegramProvider
             if (string.IsNullOrWhiteSpace(itemToTrack.TextContent) && !string.IsNullOrWhiteSpace(inspection.Transcript))
             {
                 itemToTrack.TextContent = inspection.Transcript;
-                await db.SaveChangesAsync(ct);
             }
+            if (!string.IsNullOrWhiteSpace(inspection.ExtractedGitHubUrl) && !itemToTrack.CanonicalUrl.Contains("github.com"))
+            {
+                itemToTrack.CanonicalUrl = inspection.ExtractedGitHubUrl;
+            }
+            if (!string.IsNullOrWhiteSpace(inspection.ExtractedTopic))
+            {
+                itemToTrack.Category = inspection.ExtractedTopic;
+            }
+            await db.SaveChangesAsync(ct);
         }
         else
         {
@@ -586,16 +594,24 @@ public class TelegramBotService : ITelegramProvider
                 await db.SaveChangesAsync(ct);
             }
 
+            var itemCategory = !string.IsNullOrWhiteSpace(inspection.ExtractedTopic)
+                ? inspection.ExtractedTopic
+                : (inspection.IsLegit ? "Verified Video / Tool" : "Suspicious Content");
+
+            var itemCanonical = !string.IsNullOrWhiteSpace(inspection.ExtractedGitHubUrl)
+                ? inspection.ExtractedGitHubUrl
+                : canonicalUrl;
+
             // Persist inspected item into SQLite database
             itemToTrack = new ContentItem
             {
                 SourceId = defaultSource.Id,
                 Title = inspection.Title,
                 Url = url,
-                CanonicalUrl = canonicalUrl,
+                CanonicalUrl = itemCanonical,
                 Author = inspection.Author,
                 Platform = inspection.Platform,
-                Category = inspection.IsLegit ? "Verified Video / Tool" : "Suspicious Content",
+                Category = itemCategory,
                 Summary = inspection.Summary,
                 TextContent = inspection.Transcript,
                 ImageUrl = inspection.ImageUrl,
@@ -617,9 +633,20 @@ public class TelegramBotService : ITelegramProvider
 
         var card = $"{imagePrefix}{badge} <b>SIGNAL VIDEO & LINK VERIFICATION</b>\n\n" +
                    $"<b><a href=\"{url}\">{WebUtility.HtmlEncode(inspection.Title)}</a></b>\n" +
-                   $"📍 <b>Platform:</b> {inspection.Platform} | 👤 <b>Creator:</b> {WebUtility.HtmlEncode(inspection.Author ?? "Unknown")}\n\n" +
-                   $"🛡️ <b>Legitimacy Verdict:</b> <b>{inspection.LegitimacyVerdict}</b> ({inspection.Confidence * 100:F0}% confidence)\n" +
-                   $"💡 <b>Analysis:</b> {WebUtility.HtmlEncode(inspection.SafeRecommendation ?? "Analysis completed.")}\n\n";
+                   $"📍 <b>Platform:</b> {inspection.Platform} | 👤 <b>Creator:</b> {WebUtility.HtmlEncode(inspection.Author ?? "Unknown")}\n\n";
+
+        if (!string.IsNullOrWhiteSpace(inspection.ExtractedTopic))
+        {
+            card += $"🎯 <b>Detected Topic:</b> <b>{WebUtility.HtmlEncode(inspection.ExtractedTopic)}</b>\n\n";
+        }
+
+        if (!string.IsNullOrWhiteSpace(inspection.ExtractedGitHubUrl))
+        {
+            card += $"🐙 <b>Extracted GitHub Repo:</b> <b><a href=\"{inspection.ExtractedGitHubUrl}\">{inspection.ExtractedGitHubUrl}</a></b>\n\n";
+        }
+
+        card += $"🛡️ <b>Legitimacy Verdict:</b> <b>{inspection.LegitimacyVerdict}</b> ({inspection.Confidence * 100:F0}% confidence)\n" +
+                $"💡 <b>Analysis:</b> {WebUtility.HtmlEncode(inspection.SafeRecommendation ?? "Analysis completed.")}\n\n";
 
         if (inspection.Claims.Count > 0)
         {
@@ -637,20 +664,26 @@ public class TelegramBotService : ITelegramProvider
             card += $"🎙️ <b>Transcript / Audio Extract:</b>\n<i>{WebUtility.HtmlEncode(preview)}</i>\n\n";
         }
 
+        var inlineRows = new List<List<TelegramInlineKeyboardButton>>
+        {
+            new()
+            {
+                new() { Text = "📑 Read Full Transcript", CallbackData = $"transcript:{itemToTrack.Id}" },
+                new() { Text = "⭐ Save Tool to Sheet", CallbackData = $"savetool:{itemToTrack.Id}" }
+            }
+        };
+
+        var row2 = new List<TelegramInlineKeyboardButton>();
+        if (!string.IsNullOrWhiteSpace(inspection.ExtractedGitHubUrl))
+        {
+            row2.Add(new() { Text = "🐙 Open GitHub Repo", Url = inspection.ExtractedGitHubUrl });
+        }
+        row2.Add(new() { Text = "🔗 Open Video / Link", Url = url });
+        inlineRows.Add(row2);
+
         var keyboard = new TelegramInlineKeyboardMarkup
         {
-            InlineKeyboard = new List<List<TelegramInlineKeyboardButton>>
-            {
-                new()
-                {
-                    new() { Text = "📑 Read Full Transcript", CallbackData = $"transcript:{itemToTrack.Id}" },
-                    new() { Text = "⭐ Save to Sheet", CallbackData = $"savetool:{itemToTrack.Id}" }
-                },
-                new()
-                {
-                    new() { Text = "🔗 Open Video / Link", Url = url }
-                }
-            }
+            InlineKeyboard = inlineRows
         };
 
         return new TelegramReplyResult(card, keyboard);
@@ -796,16 +829,20 @@ public class TelegramBotService : ITelegramProvider
             if (toolItem == null)
                 return "⚠️ Tool item not found.";
 
+            var targetRepoUrl = !string.IsNullOrWhiteSpace(toolItem.CanonicalUrl) && toolItem.CanonicalUrl.Contains("github.com")
+                ? toolItem.CanonicalUrl
+                : toolItem.Url;
+
             var result = await sheetsProvider.SyncToolRepoAsync(
                 toolItem.Title,
-                toolItem.Url,
+                targetRepoUrl,
                 toolItem.Summary ?? toolItem.TextContent,
                 toolItem.Category ?? "Developer Tools",
-                0.9,
+                0.95,
                 cancellationToken);
 
             return result.Success && result.RowIndex.HasValue
-                ? $"⭐ <b>SAVED TO GOOGLE SHEET (TOOLS)</b>\nAdded <b>{WebUtility.HtmlEncode(toolItem.Title)}</b> to the <b>'Tools'</b> tab at Row #{result.RowIndex}."
+                ? $"⭐ <b>SAVED TO GOOGLE SHEET (TOOLS)</b>\nAdded <b>{WebUtility.HtmlEncode(toolItem.Title)}</b>\n🔗 Repo: {targetRepoUrl}\nTab: <b>'Tools'</b> at Row #{result.RowIndex}."
                 : $"⭐ <b>SAVED LOCALLY</b>\nTool recorded in local offline queue: {result.ErrorMessage ?? "Pending sync"}";
         }
 
