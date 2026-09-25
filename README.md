@@ -1,213 +1,164 @@
-# SIGNAL
+<div align="center">
 
-> **Your personal information firewall. Signal over noise.**
+# ⚡ SIGNAL
 
-Signal is an open-source, zero-cost intelligence, developer opportunity, and social signal platform built with .NET 10 and ASP.NET Core. It monitors the internet—AI blogs, RSS feeds, YouTube channels, developer programs, and social discovery feeds—to filter out clickbait, rage-bait, and repetitive reposts, bringing only verified, high-value AI releases, free developer tools, and limited-time opportunities straight to your Telegram and personal Google Sheet tracker.
+### Your personal information firewall — signal over noise.
 
----
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+[![ASP.NET Core](https://img.shields.io/badge/ASP.NET%20Core-API-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://learn.microsoft.com/aspnet/core)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](docker-compose.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
-## 1. Key Capabilities & Features
+**An open-source intelligence and opportunity platform that monitors the global tech ecosystem, verifies what matters, and delivers a focused digest through Telegram.**
 
-- **24/7 Autonomous Ingestion (Every 30 Minutes):**
-  Continuously monitors US, Chinese, and Japanese platforms (OpenAI, DeepSeek, Qwen, Anthropic, Google DeepMind, GitHub, Qiita, Hatena, Zenn, Reddit r/LocalLLaMA, r/freebies).
-- **Strict English-Only Guarantee (100% Translated):**
-  Multi-engine translation (Google GTX, Chrome Dict API, MyMemory, Lingva) auto-detects foreign scripts (Chinese, Japanese, Korean, Russian, Arabic) and translates them into clear English. Zero foreign characters ever reach Telegram.
-- **Topic-Segregated Intelligence Digest:**
-  Automatically categorizes discoveries into distinct topics with explanatory context and image previews:
-  - 🤖 **AI NEWS & OFFERS**
-  - 🛠️ **SOFTWARE & DEVELOPER TOOLS**
-  - 🎁 **FREEBIES & DEALS**
-  - 📰 **TECH ECOSYSTEM & INNOVATION**
-- **GitHub Repository Extraction & Direct Task Usage:**
-  Extracts GitHub repositories from video transcripts, descriptions, articles, and websites. Includes direct repository links and interactive buttons to use and inspect code immediately.
-- **YouTube & Instagram Reel Legitimacy Verifier (`/verify <url>`):**
-  Pulls full captions and transcripts from YouTube and Instagram Reels. Detects bypass scams, malware downloads (.zip/.exe), and fake claims.
-- **Two-Tab Google Sheets Integration:**
-  - `Opportunities` tab: Saves approved API credits, cloud grants, and free tiers.
-  - `Tools` tab: Saves trending open-source developer tools, CLI utilities, and GitHub repositories.
+[✨ Features](#-what-signal-does) · [🚀 Quick start](#-quick-start) · [🤖 Bot commands](#-telegram-bot) · [🏗️ Architecture](#️-how-it-works) · [🗺️ Roadmap](#️-what-is-next)
+
+</div>
 
 ---
 
-## 2. Interactive Telegram Bot Controls
+## 🎯 What Signal does
 
-| Command | Action |
+Signal turns a noisy stream of AI, developer, and technology updates into useful, verified actions:
+
+| Capability | What you get |
 |---|---|
-| `/today` | Curated discoveries segregated by topic with image previews and context |
-| `/offers` | Free AI credits, API grants, and discounts (Claude, OpenAI, Gemini, Cursor, Muse) |
-| `/tools` | Trending open-source developer tools, CLI utilities & GitHub repos |
-| `/global` | International AI releases (DeepSeek, Qwen, Qiita, Hatena) auto-translated to English |
-| `/verify <url>` | Deep verification of YouTube, Instagram Reel, or article link for scams & legitimacy |
-| `/transcript <url>` | Extract full timestamped audio transcript or video script |
-| `/saved` | View your personal approved library |
+| 🌍 **Global ingestion** | RSS, YouTube, blogs, GitHub, Reddit, and international sources monitored every 30 minutes |
+| 🧠 **Signal scoring** | Relevance, quality, trust, deduplication, and cross-source story consolidation |
+| 🌐 **English-first digest** | Chinese, Japanese, Korean, Russian, and Arabic sources translated through free fallback engines |
+| 🛡️ **Link verification** | Transcript and claim checks for YouTube, Instagram Reels, and articles, including scam indicators |
+| 🧰 **Developer discovery** | GitHub repositories, open-source tools, API credits, free tiers, and useful offers extracted automatically |
+| 📌 **Personal library** | Approve and save opportunities or tools directly to Google Sheets |
+| 💸 **$0/month friendly** | SQLite, Docker, local AI/Ollama, free translation tiers, and optional free hosting |
 
----
-
-## 3. System Architecture
-
-```text
-                             +------------------------+
-                             |   Upstream Sources     |
-                             |  RSS / YouTube / Blogs |
-                             +-----------+------------+
-                                         |
-                                         v
-                             +------------------------+
-                             |  Ingestion Engine      |
-                             |  (30-Min Resilient)    |
-                             +-----------+------------+
-                                         |
-                                         v
-+-----------------------+    +------------------------+
-| Level 1-4 Dedupe      |    | Canonicalization &     |
-| (URL, Hash, Jaccard)  |<-->| Multi-Tier Translation |
-+-----------------------+    +-----------+------------+
-                                         |
-                                         v
-+-----------------------+    +------------------------+
-| Multi-Platform Story  |<---| Video Inspection &     |
-| Consolidation         |    | Transcript Extraction  |
-+-----------------------+    +-----------+------------+
-                                         |
-                                         v
-+-----------------------+    +------------------------+
-| GitHub Extractor      |<-->| Signal Scoring Engine  |
-| (Repo Discovery)      |    | (Relevance & Quality)  |
-+-----------------------+    +-----------+------------+
-                                         |
-                                         v
-                             +------------------------+
-                             | Telegram Bot Interface |
-                             | (Topic Digest & Cards) |
-                             +-----------+------------+
-                                         |
-                                         | [Approve & Save]
-                                         v
-                             +------------------------+
-                             | Google Sheets (2 Tabs) |
-                             | Opportunities & Tools  |
-                             +------------------------+
-```
-
----
-
-## 4. Zero-Cost ($0/Month) Strategy
-
-Signal is engineered to run entirely free of charge:
-- **Database:** Local SQLite file (`signal.db`) requiring no external database subscription.
-- **Compute:** Capable of running on local hardware, a home server, Raspberry Pi, or free tier container hosting.
-- **AI Processing:** Operates seamlessly with `AI_PROVIDER=none` using regex heuristics, trust weighting, and fuzzy title matching. Optionally hooks into local **Ollama** or free tiers of Groq and Gemini.
-- **Translation:** 4-tier free translation engine requiring zero paid API keys.
-- **Spreadsheet Sync:** Uses a serverless Google Apps Script Web App requiring no paid GCP developer accounts or OAuth verification fees.
-
----
-
-## 5. Getting Started (Local Setup)
+## ⚡ Quick start
 
 ### Prerequisites
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- Git
 
-### Installation
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+- Git — or Docker and Docker Compose
+- Optional: Telegram bot token and Google Sheets Apps Script URL
+
+### Run locally
+
 ```bash
-# Clone the repository
 git clone https://github.com/shivadha/signal.git
 cd signal
-
-# Switch to develop or main branch
-git checkout main
-
-# Copy environment configuration
 cp .env.example .env
 
-# Restore dependencies and build
 dotnet restore
 dotnet build
-
-# Execute test suite
 dotnet test
-```
 
-### Running the API & Background Worker
-```bash
-# Run the API (hosts Webhook, API, Worker, and Telegram Polling)
 dotnet run --project src/Signal.Api
-
-# Or run the Worker standalone
-dotnet run --project src/Signal.Worker
 ```
 
----
+The API, worker, webhook, and Telegram polling are hosted together. Health check:
 
-## 6. Docker Deployment ($0/Month)
-
-Launch Signal with persistent SQLite storage in one command:
-
-```bash
-docker compose up -d
-```
-
-Check API health:
 ```bash
 curl http://localhost:8080/health
 ```
 
----
+### Run with Docker
 
-## 7. Cloud Deployment (Free 24/7 Hosting)
+```bash
+docker compose up -d
+# Follow logs
+docker compose logs -f
+```
 
-For step-by-step instructions on deploying to **Render.com**, **Koyeb**, **Fly.io**, or **Windows Silent Runner**, see:
-📘 [Free Deployment Guide](docs/free-deployment-guide.md)
+> 🔐 **Keep secrets out of Git.** Configure `.env` locally and never commit bot tokens, chat IDs, or deployment URLs.
 
----
+## 🤖 Telegram bot
 
-## 8. Telegram Bot Setup
+Signal is designed around fast, interactive Telegram cards and approval buttons:
 
-1. Open Telegram and message `@BotFather` to create a new bot. Copy the bot token.
-2. Message your new bot and get your numeric Chat ID (e.g. using `@userinfobot`).
-3. Set the variables in your `.env` file:
-   ```env
-   TELEGRAM_BOT_TOKEN=your_bot_token_here
-   TELEGRAM_CHAT_ID=your_chat_id_here
-   ```
-4. Start the application. The bot responds to `/start`, `/today`, `/offers`, `/tools`, `/global`, `/verify <url>`, and interactive approval buttons.
+| Command | Experience |
+|---|---|
+| `/today` | Topic-separated daily digest with images and context |
+| `/offers` | AI credits, cloud grants, discounts, and free tiers |
+| `/tools` | Open-source tools, CLI utilities, and GitHub projects |
+| `/global` | International AI releases translated into English |
+| `/verify <url>` | Check a video, reel, or article for legitimacy and risk |
+| `/transcript <url>` | Extract a timestamped transcript or script |
+| `/saved` | Browse your approved personal library |
 
----
+Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env`, then start the app. See the [Telegram setup guide](#-telegram-setup) for details.
 
-## 9. Google Sheets 2-Tab Setup
+## 🏗️ How it works
 
-Signal connects to Google Sheets via a lightweight Google Apps Script Web App:
+```mermaid
+flowchart LR
+    A[RSS · YouTube · Blogs · GitHub · Reddit] --> B[30-minute ingestion]
+    B --> C[Canonicalization & deduplication]
+    C --> D[Translation & transcript extraction]
+    D --> E[Story clustering & signal scoring]
+    E --> F[Telegram digest]
+    F --> G{Approve?}
+    G -->|Opportunity| H[(Google Sheets)]
+    G -->|Tool| H
+```
 
-1. Open your target Google Sheet and create two tabs: `Opportunities` and `Tools`.
-2. Navigate to **Extensions > Apps Script**.
-3. Copy the script provided in `deploy/google-apps-script.js` into the editor.
-4. Click **Deploy > New deployment**, select type **Web App**, set access to **Anyone**, and click **Deploy**.
-5. Copy the generated Web App URL and add it to your `.env`:
-   ```env
-   GOOGLE_SHEETS_ENABLED=true
-   GOOGLE_APPS_SCRIPT_URL=https://script.google.com/macros/s/AKfycbx.../exec
-   ```
-6. When you click **[✅ APPROVE & SAVE]** or **[⭐ SAVE TOOL TO SHEET]** in Telegram, Signal formats and appends the item to the respective tab immediately.
+The solution is organized around focused .NET projects under [`src/`](src/):
 
----
+```text
+sources → ingestion → normalization → scoring → Telegram cards → saved library
+```
 
-## 10. Development Roadmap
+## 🧩 Configuration
 
-- [x] **Phase 0: Foundation:** Solution architecture, Clean Architecture scaffolding, Docker, tests, and documentation.
-- [x] **Phase 1: Source & Database:** SQLite EF Core context, RSS feed ingest, URL canonicalization, and seed sources.
-- [x] **Phase 2: Telegram Bot:** Telegram client, interactive buttons, `/today`, `/offers`, `/tools`, `/global`, `/verify`, and `/saved`.
-- [x] **Phase 3: AI Engine:** Heuristics, IAIProvider abstractions (Ollama, Groq, Gemini), and scoring.
-- [x] **Phase 4: Verification:** Claim verification against official sources, scam detection, and opportunity expiry tracker.
-- [x] **Phase 5: Story Engine:** Cross-source clustering and new information delta detector.
-- [x] **Phase 6: YouTube Ingestion:** YouTube channel feeds, transcript extraction, and caption analyzer.
-- [x] **Phase 7: Google Sheets Gateway:** Resilient offline queue, Apps Script bridge, and 2-tab sync (Opportunities & Tools).
-- [x] **Phase 8: Autonomous Scheduling:** 24/7 background worker with 30-minute automated discovery passes.
-- [x] **Phase 9: Multi-Language Translation:** 4-tier free translation engine with 100% strict English-only guarantee.
-- [x] **Phase 10: Video Legitimacy & GitHub Extractor:** Scam detection for YouTube & Instagram Reels with extracted GitHub repository links.
+Copy `.env.example` to `.env` and configure only the integrations you need:
 
----
+```env
+AI_PROVIDER=none
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+GOOGLE_SHEETS_ENABLED=false
+GOOGLE_APPS_SCRIPT_URL=
+```
 
-## 11. Contributing & License
+Signal works without a paid AI provider using heuristics, trust weighting, and fuzzy matching. You can optionally connect Ollama, Groq, or Gemini later.
 
-Contributions are welcome! Please submit PRs against the `develop` branch.
+## 📊 Google Sheets sync
 
-Licensed under the [MIT License](LICENSE).
+To save approved items into two tabs:
+
+1. Create `Opportunities` and `Tools` tabs in a Google Sheet.
+2. Copy [`deploy/google-apps-script.js`](deploy/google-apps-script.js) into Apps Script.
+3. Deploy it as a Web App with access set to **Anyone**.
+4. Set `GOOGLE_SHEETS_ENABLED=true` and `GOOGLE_APPS_SCRIPT_URL` in `.env`.
+5. Use the approval buttons in Telegram.
+
+Read the full [free deployment guide](docs/free-deployment-guide.md) for Render, Koyeb, Fly.io, and Windows Runner options.
+
+## 🗺️ What is next
+
+- [x] Clean Architecture foundation, Docker, tests, and SQLite
+- [x] RSS ingestion, Telegram controls, scoring, verification, and story engine
+- [x] YouTube ingestion, transcripts, translation, and GitHub extraction
+- [x] Google Sheets gateway with resilient offline queue
+- [x] Autonomous 30-minute scheduling
+- [ ] More source connectors and configurable user preferences
+- [ ] Web dashboard for browsing and searching the signal archive
+- [ ] Observability dashboard and richer evaluation metrics
+
+## 🛠️ Contributing
+
+Contributions, source suggestions, bug reports, and new verification rules are welcome. Please open an issue first for larger changes, then submit a pull request against `main`.
+
+```bash
+dotnet format
+dotnet test
+```
+
+## 📄 License
+
+Released under the [MIT License](LICENSE).
+
+<div align="center">
+
+**Built to help builders spend less time searching and more time shipping.**
+
+[⬆ Back to top](#-signal)
+
+</div>
