@@ -73,8 +73,11 @@ public static class DependencyInjection
         services.AddScoped<SourceIngestionService>();
         services.AddScoped<SignalScoringService>();
         services.AddScoped<OpportunityDetectionService>();
+        services.AddScoped<StoryClusteringService>();
+        services.AddScoped<VerificationService>();
 
         return services;
     }
 }
+
 
