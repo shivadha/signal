@@ -246,11 +246,11 @@ public class TelegramBotService : ITelegramProvider
                $"{op.Description ?? "High value developer release."}";
     }
 
-    private async Task<bool> SendMessageAsync(
+    public async Task<bool> SendMessageAsync(
         string chatId,
         string text,
-        TelegramInlineKeyboardMarkup? keyboard,
-        CancellationToken cancellationToken)
+        TelegramInlineKeyboardMarkup? keyboard = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -279,4 +279,109 @@ public class TelegramBotService : ITelegramProvider
             return false;
         }
     }
+
+    public async Task<IReadOnlyList<TelegramUpdate>> GetUpdatesAsync(long offset = 0, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(_botToken))
+            return Array.Empty<TelegramUpdate>();
+
+        try
+        {
+            var url = $"https://api.telegram.org/bot{_botToken}/getUpdates?offset={offset}&timeout=20";
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                return Array.Empty<TelegramUpdate>();
+
+            var doc = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+            if (doc.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Array)
+            {
+                var updates = new List<TelegramUpdate>();
+                foreach (var element in result.EnumerateArray())
+                {
+                    var update = JsonSerializer.Deserialize<TelegramUpdate>(element.GetRawText());
+                    if (update != null) updates.Add(update);
+                }
+                return updates;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to fetch Telegram updates via long polling.");
+        }
+
+        return Array.Empty<TelegramUpdate>();
+    }
+
+    public async Task<bool> AnswerCallbackQueryAsync(string callbackQueryId, string? text = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(_botToken))
+            return false;
+
+        try
+        {
+            var url = $"https://api.telegram.org/bot{_botToken}/answerCallbackQuery";
+            var payload = new { callback_query_id = callbackQueryId, text };
+            using var response = await _httpClient.PostAsJsonAsync(url, payload, cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to answer Telegram callback query.");
+            return false;
+        }
+    }
+
+    public async Task<string> HandleCallbackAsync(
+        string callbackData,
+        ISignalDbContext db,
+        IGoogleSheetsProvider sheetsProvider,
+        CancellationToken cancellationToken = default)
+    {
+        var parts = callbackData.Split(':', 2);
+        var action = parts[0].ToLowerInvariant();
+        var idStr = parts.Length > 1 ? parts[1] : string.Empty;
+
+        if (!Guid.TryParse(idStr, out var opportunityId))
+        {
+            return "⚠️ Invalid opportunity reference.";
+        }
+
+        var opp = await db.Opportunities
+            .Include(o => o.ContentItem)
+            .FirstOrDefaultAsync(o => o.Id == opportunityId, cancellationToken);
+
+        if (opp == null)
+            return "⚠️ Opportunity not found or expired.";
+
+        switch (action)
+        {
+            case "approve":
+                opp.Status = OpportunityStatus.Approved;
+                var syncResult = await sheetsProvider.SyncOpportunityAsync(opp, cancellationToken);
+                return syncResult.Success && syncResult.RowIndex.HasValue
+                    ? $"✅ <b>SAVED & APPROVED</b>\nAdded to Google Sheet at Row #{syncResult.RowIndex}."
+                    : $"✅ <b>SAVED LOCALLY</b>\nQueued for Google Sheets sync: {syncResult.ErrorMessage ?? "Pending sync"}";
+
+            case "save":
+                opp.Status = OpportunityStatus.Saved;
+                await db.SaveChangesAsync(cancellationToken);
+                return "⭐ <b>Saved for Later!</b> You can view this anytime with <code>/saved</code>.";
+
+            case "reject":
+                opp.Status = OpportunityStatus.Rejected;
+                await db.SaveChangesAsync(cancellationToken);
+                return "❌ <b>Rejected.</b> Similar notifications will be down-weighted.";
+
+            case "evidence":
+                return $"🔎 <b>EVIDENCE PROVENANCE</b>\n\n" +
+                       $"<b>Source:</b> {opp.OfficialSourceUrl ?? "Official publisher"}\n" +
+                       $"<b>Verification Status:</b> {opp.VerificationStatus}\n" +
+                       $"<b>Confidence Score:</b> {opp.VerificationScore * 100:F0}%\n" +
+                       $"<b>Eligibility:</b> {opp.Eligibility ?? "Developers"}";
+
+            default:
+                return "Action processed.";
+        }
+    }
 }
+

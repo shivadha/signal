@@ -13,6 +13,8 @@ builder.Configuration.AddEnvironmentVariables();
 // Add Infrastructure & Application services
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHostedService<Worker>();
+builder.Services.AddHostedService<TelegramPollingService>();
+
 
 var host = builder.Build();
 

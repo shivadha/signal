@@ -56,9 +56,11 @@ public record TelegramInlineKeyboardButton
     public string Text { get; init; } = string.Empty;
 
     [JsonPropertyName("url")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Url { get; init; }
 
     [JsonPropertyName("callback_data")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CallbackData { get; init; }
 }
 
@@ -80,5 +82,7 @@ public record TelegramSendMessagePayload
     public string ParseMode { get; init; } = "HTML";
 
     [JsonPropertyName("reply_markup")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TelegramInlineKeyboardMarkup? ReplyMarkup { get; init; }
 }
+
