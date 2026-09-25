@@ -7,8 +7,10 @@ using Signal.Infrastructure.Persistence;
 using Signal.Infrastructure.Providers;
 using Signal.Infrastructure.Providers.AI;
 using Signal.Infrastructure.Providers.Telegram;
+using Signal.Infrastructure.Providers.YouTube;
 
 namespace Signal.Infrastructure;
+
 
 public static class DependencyInjection
 {
@@ -76,8 +78,18 @@ public static class DependencyInjection
         services.AddScoped<StoryClusteringService>();
         services.AddScoped<VerificationService>();
 
+        // YouTube Provider
+        services.AddHttpClient<YouTubeSourceProvider>();
+        services.AddScoped<ISourceProvider, YouTubeSourceProvider>();
+
+        // Google Sheets Integration
+        services.AddHttpClient<GoogleSheetApprovalService>();
+        services.AddScoped<IGoogleSheetsProvider, GoogleSheetApprovalService>();
+        services.AddScoped<GoogleSheetApprovalService>();
+
         return services;
     }
 }
+
 
 
