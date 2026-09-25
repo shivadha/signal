@@ -6,6 +6,7 @@ using Signal.Application.Services;
 using Signal.Infrastructure.Persistence;
 using Signal.Infrastructure.Providers;
 using Signal.Infrastructure.Providers.AI;
+using Signal.Infrastructure.Providers.Telegram;
 
 namespace Signal.Infrastructure;
 
@@ -52,6 +53,11 @@ public static class DependencyInjection
                 services.AddScoped<IAIProvider, NoneAiProvider>();
                 break;
         }
+
+        // Telegram Bot Provider
+        services.AddHttpClient<TelegramBotService>();
+        services.AddScoped<ITelegramProvider, TelegramBotService>();
+        services.AddScoped<TelegramBotService>();
 
         // Application services
         services.AddSingleton<IContentNormalizer, ContentNormalizationService>();
