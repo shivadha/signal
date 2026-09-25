@@ -20,8 +20,8 @@ RUN dotnet build -c Release --no-restore
 RUN dotnet test -c Release --no-build
 
 # Publish API & Worker
-RUN dotnet publish src/Signal.Api/Signal.Api.csproj -c Release -o /app/api --no-build
-RUN dotnet publish src/Signal.Worker/Signal.Worker.csproj -c Release -o /app/worker --no-build
+RUN dotnet publish src/Signal.Api/Signal.Api.csproj -c Release -o /app/api --no-build -p:ErrorOnDuplicatePublishOutputFiles=false
+RUN dotnet publish src/Signal.Worker/Signal.Worker.csproj -c Release -o /app/worker --no-build -p:ErrorOnDuplicatePublishOutputFiles=false
 
 # Runtime Stage for API
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
