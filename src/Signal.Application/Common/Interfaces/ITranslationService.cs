@@ -4,4 +4,6 @@ public interface ITranslationService
 {
     Task<string> TranslateToEnglishAsync(string text, string? sourceLanguage = null, CancellationToken cancellationToken = default);
     bool NeedsTranslation(string text);
+    string DetectLanguage(string text);
+    string SanitizeToEnglish(string? text);
 }

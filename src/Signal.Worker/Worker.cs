@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -16,6 +18,10 @@ public class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
     private readonly TimeSpan _pollingInterval = TimeSpan.FromMinutes(30);
     private bool _isFirstRun = true;
+
+    private static readonly Regex GitHubRepoRegex = new(
+        @"https?://(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public Worker(IServiceProvider serviceProvider, ILogger<Worker> logger)
     {
@@ -41,6 +47,14 @@ public class Worker : BackgroundService
                     var ingestionService = scope.ServiceProvider.GetRequiredService<SourceIngestionService>();
                     var opportunityDetector = scope.ServiceProvider.GetRequiredService<OpportunityDetectionService>();
                     var botService = scope.ServiceProvider.GetRequiredService<TelegramBotService>();
+                    var translationService = scope.ServiceProvider.GetRequiredService<ITranslationService>();
+                    var dbContext = scope.ServiceProvider.GetRequiredService<ISignalDbContext>();
+
+                    // On startup, ensure any existing database records in foreign languages are translated
+                    if (_isFirstRun)
+                    {
+                        await EnsureExistingContentTranslatedAsync(dbContext, translationService, stoppingToken);
+                    }
 
                     var summary = await ingestionService.IngestAllActiveSourcesAsync(stoppingToken);
 
@@ -62,7 +76,7 @@ public class Worker : BackgroundService
                     // Process automatic notification for newly discovered items
                     if (summary.NewItems.Count > 0)
                     {
-                        await ProcessNewDiscoveriesNotificationAsync(summary.NewItems, opportunityDetector, botService, stoppingToken);
+                        await ProcessNewDiscoveriesNotificationAsync(summary.NewItems, opportunityDetector, botService, translationService, stoppingToken);
                     }
                     else
                     {
@@ -87,10 +101,72 @@ public class Worker : BackgroundService
         _logger.LogInformation("Signal Ingestion Worker stopped gracefully.");
     }
 
+    private async Task EnsureExistingContentTranslatedAsync(ISignalDbContext dbContext, ITranslationService translationService, CancellationToken ct)
+    {
+        try
+        {
+            var candidates = await dbContext.ContentItems
+                .Where(c => c.Language != "en")
+                .Take(100)
+                .ToListAsync(ct);
+
+            if (candidates.Count == 0)
+            {
+                candidates = (await dbContext.ContentItems
+                    .OrderByDescending(c => c.DiscoveredAt)
+                    .Take(150)
+                    .ToListAsync(ct))
+                    .Where(c => translationService.NeedsTranslation(c.Title) || translationService.NeedsTranslation(c.Summary ?? ""))
+                    .Take(100)
+                    .ToList();
+            }
+
+            if (candidates.Count > 0)
+            {
+                _logger.LogInformation("Translating {Count} existing international items in database to English...", candidates.Count);
+                int translatedCount = 0;
+                foreach (var item in candidates)
+                {
+                    bool changed = false;
+                    if (translationService.NeedsTranslation(item.Title))
+                    {
+                        var trans = await translationService.TranslateToEnglishAsync(item.Title, item.Language, ct);
+                        item.Title = translationService.SanitizeToEnglish(trans);
+                        changed = true;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(item.Summary) && translationService.NeedsTranslation(item.Summary))
+                    {
+                        var trans = await translationService.TranslateToEnglishAsync(item.Summary, item.Language, ct);
+                        item.Summary = translationService.SanitizeToEnglish(trans);
+                        changed = true;
+                    }
+
+                    if (changed || item.Language != "en")
+                    {
+                        item.Language = "en";
+                        translatedCount++;
+                    }
+                }
+
+                if (translatedCount > 0)
+                {
+                    await dbContext.SaveChangesAsync(ct);
+                    _logger.LogInformation("Successfully translated and saved {Count} items to English in database.", translatedCount);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to run translation sweep on existing items.");
+        }
+    }
+
     private async Task ProcessNewDiscoveriesNotificationAsync(
         List<ContentItem> newItems,
         OpportunityDetectionService opportunityDetector,
         TelegramBotService botService,
+        ITranslationService translationService,
         CancellationToken ct)
     {
         var handledItemIds = new HashSet<Guid>();
@@ -178,7 +254,7 @@ public class Worker : BackgroundService
                 sb.AppendLine("🤖 <b>AI NEWS & OFFERS</b>");
                 foreach (var it in aiNews)
                 {
-                    AppendItemDetails(sb, it);
+                    await AppendItemDetailsAsync(sb, it, translationService, ct);
                 }
                 sb.AppendLine();
             }
@@ -188,7 +264,7 @@ public class Worker : BackgroundService
                 sb.AppendLine("🛠️ <b>SOFTWARE & DEVELOPER TOOLS</b>");
                 foreach (var it in toolsAndSoftware)
                 {
-                    AppendItemDetails(sb, it);
+                    await AppendItemDetailsAsync(sb, it, translationService, ct);
                 }
                 sb.AppendLine();
             }
@@ -198,7 +274,7 @@ public class Worker : BackgroundService
                 sb.AppendLine("🎁 <b>FREEBIES & DEALS</b>");
                 foreach (var it in freebiesAndDeals)
                 {
-                    AppendItemDetails(sb, it);
+                    await AppendItemDetailsAsync(sb, it, translationService, ct);
                 }
                 sb.AppendLine();
             }
@@ -208,12 +284,14 @@ public class Worker : BackgroundService
                 sb.AppendLine("📰 <b>TECH ECOSYSTEM & INNOVATION</b>");
                 foreach (var it in generalTech)
                 {
-                    AppendItemDetails(sb, it);
+                    await AppendItemDetailsAsync(sb, it, translationService, ct);
                 }
                 sb.AppendLine();
             }
 
             var message = sb.ToString();
+            message = translationService.SanitizeToEnglish(message);
+
             if (message.Length > 3900)
             {
                 message = message[..3890] + "...";
@@ -223,21 +301,57 @@ public class Worker : BackgroundService
         }
     }
 
-    private static void AppendItemDetails(StringBuilder sb, ContentItem it)
+    private static async Task AppendItemDetailsAsync(StringBuilder sb, ContentItem it, ITranslationService translationService, CancellationToken ct)
     {
+        var title = it.Title;
+        if (translationService.NeedsTranslation(title))
+        {
+            title = await translationService.TranslateToEnglishAsync(title, it.Language, ct);
+        }
+        title = translationService.SanitizeToEnglish(title);
+
         var briefContext = !string.IsNullOrWhiteSpace(it.Summary) ? it.Summary : it.TextContent;
+        if (!string.IsNullOrWhiteSpace(briefContext) && translationService.NeedsTranslation(briefContext))
+        {
+            briefContext = await translationService.TranslateToEnglishAsync(briefContext, it.Language, ct);
+        }
+        briefContext = translationService.SanitizeToEnglish(briefContext);
+
         if (!string.IsNullOrWhiteSpace(briefContext) && briefContext.Length > 160)
         {
             briefContext = briefContext[..157] + "...";
         }
 
         var imageTag = !string.IsNullOrWhiteSpace(it.ImageUrl) ? $" • <a href=\"{it.ImageUrl}\">🖼️ Preview</a>" : "";
-        sb.AppendLine($"• <b><a href=\"{it.Url}\">{WebUtility.HtmlEncode(it.Title)}</a></b>{imageTag}");
+        sb.AppendLine($"• <b><a href=\"{it.Url}\">{WebUtility.HtmlEncode(title)}</a></b>{imageTag}");
         sb.AppendLine($"  📍 <i>{WebUtility.HtmlEncode(it.Platform)}</i> | 🏷️ <i>{WebUtility.HtmlEncode(it.Category ?? "Tech")}</i>");
         if (!string.IsNullOrWhiteSpace(briefContext))
         {
             sb.AppendLine($"  💡 <i>{WebUtility.HtmlEncode(briefContext)}</i>");
         }
+
+        var git = ExtractGitHubRepoUrl($"{it.Url} {it.Summary} {it.TextContent}");
+        if (!string.IsNullOrWhiteSpace(git))
+        {
+            sb.AppendLine($"  🐙 <b>GitHub:</b> <a href=\"{git}\">{git}</a>");
+        }
+    }
+
+    private static string? ExtractGitHubRepoUrl(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var match = GitHubRepoRegex.Match(text);
+        if (match.Success)
+        {
+            var owner = match.Groups[1].Value.ToLowerInvariant();
+            var repo = match.Groups[2].Value.ToLowerInvariant().TrimEnd('/', '.');
+            string[] reserved = ["features", "pricing", "about", "contact", "login", "signup", "settings", "explore", "trending", "topics", "pulls", "issues", "site"];
+            if (!reserved.Contains(owner) && !reserved.Contains(repo))
+            {
+                return $"https://github.com/{match.Groups[1].Value}/{match.Groups[2].Value.TrimEnd('/', '.')}";
+            }
+        }
+        return null;
     }
 
     private static bool IsAiNews(ContentItem it)
@@ -264,4 +378,3 @@ public class Worker : BackgroundService
             || text.Contains("freebies");
     }
 }
-

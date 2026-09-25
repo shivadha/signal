@@ -48,6 +48,12 @@ public class TelegramBotService : ITelegramProvider
 
     public async Task<bool> SendAlertAsync(string message, CancellationToken cancellationToken = default)
     {
+        if (_translationService.NeedsTranslation(message))
+        {
+            message = await _translationService.TranslateToEnglishAsync(message, "auto", cancellationToken);
+            message = _translationService.SanitizeToEnglish(message);
+        }
+
         if (!IsConfigured)
         {
             _logger.LogInformation("[Telegram MOCK Alert]: {Message}", message);
@@ -60,6 +66,12 @@ public class TelegramBotService : ITelegramProvider
     public async Task<bool> SendOpportunityCardAsync(Opportunity opportunity, CancellationToken cancellationToken = default)
     {
         var text = FormatOpportunityHtml(opportunity);
+        if (_translationService.NeedsTranslation(text))
+        {
+            text = await _translationService.TranslateToEnglishAsync(text, "auto", cancellationToken);
+            text = _translationService.SanitizeToEnglish(text);
+        }
+
         var imageUrl = opportunity.ContentItem?.ImageUrl;
         if (!string.IsNullOrWhiteSpace(imageUrl))
         {
@@ -98,16 +110,39 @@ public class TelegramBotService : ITelegramProvider
 
     public async Task<bool> SendToolCardAsync(ContentItem item, CancellationToken cancellationToken = default)
     {
+        var title = item.Title;
+        if (_translationService.NeedsTranslation(title))
+        {
+            title = await _translationService.TranslateToEnglishAsync(title, item.Language, cancellationToken);
+            title = _translationService.SanitizeToEnglish(title);
+        }
+
+        var details = item.Summary ?? item.TextContent ?? "Productivity accelerator.";
+        if (_translationService.NeedsTranslation(details))
+        {
+            details = await _translationService.TranslateToEnglishAsync(details, item.Language, cancellationToken);
+            details = _translationService.SanitizeToEnglish(details);
+        }
+
+        var gitUrl = ExtractGitHubRepoUrl($"{item.Url} {item.Summary} {item.TextContent}");
+
         var imagePrefix = !string.IsNullOrWhiteSpace(item.ImageUrl)
             ? $"<a href=\"{item.ImageUrl}\">&#8205;</a>"
             : string.Empty;
 
         var text = $"{imagePrefix}🛠️ <b>NEW DEVELOPER TOOL / REPOSITORY</b>\n\n" +
-                   $"<b><a href=\"{item.Url}\">{WebUtility.HtmlEncode(item.Title)}</a></b>\n\n" +
+                   $"<b><a href=\"{item.Url}\">{WebUtility.HtmlEncode(title)}</a></b>\n\n" +
                    $"📍 <b>Platform:</b> {WebUtility.HtmlEncode(item.Platform)}\n" +
-                   $"🏷️ <b>Category:</b> {WebUtility.HtmlEncode(item.Category ?? "Developer Tools")}\n\n" +
-                   $"💡 <b>What it is & Why Useful:</b>\n" +
-                   $"{WebUtility.HtmlEncode(item.Summary ?? item.TextContent ?? "Productivity accelerator.")}";
+                   $"🏷️ <b>Category:</b> {WebUtility.HtmlEncode(item.Category ?? "Developer Tools")}\n";
+
+        if (!string.IsNullOrWhiteSpace(gitUrl))
+        {
+            text += $"🐙 <b>GitHub Repo:</b> <a href=\"{gitUrl}\">{gitUrl}</a>\n" +
+                    $"💡 <i>You can use this repo directly for your tasks and inspect its code.</i>\n";
+        }
+
+        text += $"\n💡 <b>What it is & Why Useful:</b>\n" +
+                $"{WebUtility.HtmlEncode(details)}";
 
         var keyboard = new TelegramInlineKeyboardMarkup
         {
@@ -115,7 +150,7 @@ public class TelegramBotService : ITelegramProvider
             {
                 new()
                 {
-                    new() { Text = "🔗 Open Repository / Link", Url = item.Url }
+                    new() { Text = "🔗 Open Tool / Repository", Url = !string.IsNullOrWhiteSpace(gitUrl) ? gitUrl : item.Url }
                 },
                 new()
                 {
@@ -324,7 +359,7 @@ public class TelegramBotService : ITelegramProvider
                 sb.AppendLine("🤖 <b>AI NEWS & OFFERS</b>");
                 foreach (var it in aiNews)
                 {
-                    AppendDigestItem(sb, it);
+                    await AppendDigestItemAsync(sb, it, cancellationToken);
                 }
                 sb.AppendLine();
             }
@@ -334,7 +369,7 @@ public class TelegramBotService : ITelegramProvider
                 sb.AppendLine("🛠️ <b>SOFTWARE & DEVELOPER TOOLS</b>");
                 foreach (var it in tools)
                 {
-                    AppendDigestItem(sb, it);
+                    await AppendDigestItemAsync(sb, it, cancellationToken);
                 }
                 sb.AppendLine();
             }
@@ -344,7 +379,7 @@ public class TelegramBotService : ITelegramProvider
                 sb.AppendLine("🎁 <b>FREEBIES & DEALS</b>");
                 foreach (var it in freebies)
                 {
-                    AppendDigestItem(sb, it);
+                    await AppendDigestItemAsync(sb, it, cancellationToken);
                 }
                 sb.AppendLine();
             }
@@ -354,7 +389,7 @@ public class TelegramBotService : ITelegramProvider
                 sb.AppendLine("📰 <b>TECH ECOSYSTEM & INNOVATION</b>");
                 foreach (var it in ecosystem)
                 {
-                    AppendDigestItem(sb, it);
+                    await AppendDigestItemAsync(sb, it, cancellationToken);
                 }
                 sb.AppendLine();
             }
@@ -389,9 +424,16 @@ public class TelegramBotService : ITelegramProvider
             for (int i = 0; i < opportunities.Count; i++)
             {
                 var op = opportunities[i];
+                var opTitle = op.Title;
+                if (_translationService.NeedsTranslation(opTitle))
+                {
+                    opTitle = await _translationService.TranslateToEnglishAsync(opTitle, "auto", cancellationToken);
+                    opTitle = _translationService.SanitizeToEnglish(opTitle);
+                }
+
                 var imgTag = !string.IsNullOrWhiteSpace(op.ContentItem?.ImageUrl) ? $" • <a href=\"{op.ContentItem.ImageUrl}\">🖼️ Preview</a>" : "";
 
-                response += $"<b>{i + 1}. {WebUtility.HtmlEncode(op.Title)}</b>{imgTag}\n" +
+                response += $"<b>{i + 1}. {WebUtility.HtmlEncode(opTitle)}</b>{imgTag}\n" +
                             $"   🎁 <b>Value / Grant:</b> {WebUtility.HtmlEncode(op.Value ?? "Free Tier / Credits")}\n" +
                             $"   👥 <b>Eligibility:</b> {WebUtility.HtmlEncode(op.Eligibility ?? "All developers")}\n" +
                             $"   ⏳ <b>Expires:</b> {(op.ExpiryDate.HasValue ? op.ExpiryDate.Value.ToString("dd MMM yyyy") : "Ongoing")}\n" +
@@ -430,15 +472,36 @@ public class TelegramBotService : ITelegramProvider
             for (int i = 0; i < tools.Count; i++)
             {
                 var t = tools[i];
+                var title = t.Title;
+                if (_translationService.NeedsTranslation(title))
+                {
+                    title = await _translationService.TranslateToEnglishAsync(title, t.Language, cancellationToken);
+                }
+                title = _translationService.SanitizeToEnglish(title);
+
                 var desc = !string.IsNullOrWhiteSpace(t.Summary) ? t.Summary : t.TextContent;
+                if (!string.IsNullOrWhiteSpace(desc) && _translationService.NeedsTranslation(desc))
+                {
+                    desc = await _translationService.TranslateToEnglishAsync(desc, t.Language, cancellationToken);
+                }
+                desc = _translationService.SanitizeToEnglish(desc);
+
                 if (!string.IsNullOrWhiteSpace(desc) && desc.Length > 200)
                     desc = desc.Substring(0, 197) + "...";
 
                 var timeAgo = FormatRelativeTime(t.PublishedAt);
                 var imgTag = !string.IsNullOrWhiteSpace(t.ImageUrl) ? $" • <a href=\"{t.ImageUrl}\">🖼️ Preview</a>" : "";
 
-                response += $"<b>{i + 1}. <a href=\"{t.Url}\">{WebUtility.HtmlEncode(t.Title)}</a></b>{imgTag}\n" +
+                var git = ExtractGitHubRepoUrl($"{t.Url} {t.Summary} {t.TextContent}");
+
+                response += $"<b>{i + 1}. <a href=\"{t.Url}\">{WebUtility.HtmlEncode(title)}</a></b>{imgTag}\n" +
                             $"   🏷️ <b>Category:</b> {WebUtility.HtmlEncode(t.Category ?? "Developer Tool")} | 🕒 <i>{timeAgo}</i>\n";
+
+                if (!string.IsNullOrWhiteSpace(git))
+                {
+                    response += $"   🐙 <b>GitHub Repo:</b> <a href=\"{git}\">{git}</a>\n" +
+                                $"   💡 <i>Use this repository in your tasks and inspect its code.</i>\n";
+                }
 
                 if (!string.IsNullOrWhiteSpace(desc))
                 {
@@ -491,15 +554,35 @@ public class TelegramBotService : ITelegramProvider
                     _ => "🌐"
                 };
 
+                var title = g.Title;
+                if (_translationService.NeedsTranslation(title))
+                {
+                    title = await _translationService.TranslateToEnglishAsync(title, g.Source?.Language ?? g.Language, cancellationToken);
+                }
+                title = _translationService.SanitizeToEnglish(title);
+
                 var desc = !string.IsNullOrWhiteSpace(g.Summary) ? g.Summary : g.TextContent;
+                if (!string.IsNullOrWhiteSpace(desc) && _translationService.NeedsTranslation(desc))
+                {
+                    desc = await _translationService.TranslateToEnglishAsync(desc, g.Source?.Language ?? g.Language, cancellationToken);
+                }
+                desc = _translationService.SanitizeToEnglish(desc);
+
                 if (!string.IsNullOrWhiteSpace(desc) && desc.Length > 200)
                     desc = desc.Substring(0, 197) + "...";
 
                 var timeAgo = FormatRelativeTime(g.PublishedAt);
                 var imgTag = !string.IsNullOrWhiteSpace(g.ImageUrl) ? $" • <a href=\"{g.ImageUrl}\">🖼️ Preview</a>" : "";
 
-                response += $"<b>{i + 1}. {flag} <a href=\"{g.Url}\">{WebUtility.HtmlEncode(g.Title)}</a></b>{imgTag}\n" +
+                var git = ExtractGitHubRepoUrl($"{g.Url} {g.Summary} {g.TextContent}");
+
+                response += $"<b>{i + 1}. {flag} <a href=\"{g.Url}\">{WebUtility.HtmlEncode(title)}</a></b>{imgTag}\n" +
                             $"   🏢 <b>Source:</b> {WebUtility.HtmlEncode(g.Source?.Name ?? g.Platform)} | 🕒 <i>{timeAgo}</i>\n";
+
+                if (!string.IsNullOrWhiteSpace(git))
+                {
+                    response += $"   🐙 <b>GitHub:</b> <a href=\"{git}\">{git}</a>\n";
+                }
 
                 if (!string.IsNullOrWhiteSpace(desc))
                 {
@@ -626,6 +709,17 @@ public class TelegramBotService : ITelegramProvider
             await db.SaveChangesAsync(ct);
         }
 
+        if (_translationService.NeedsTranslation(inspection.Title))
+        {
+            var tr = await _translationService.TranslateToEnglishAsync(inspection.Title, "auto", ct);
+            inspection = inspection with { Title = _translationService.SanitizeToEnglish(tr) };
+        }
+        if (!string.IsNullOrWhiteSpace(inspection.Summary) && _translationService.NeedsTranslation(inspection.Summary))
+        {
+            var tr = await _translationService.TranslateToEnglishAsync(inspection.Summary, "auto", ct);
+            inspection = inspection with { Summary = _translationService.SanitizeToEnglish(tr) };
+        }
+
         var badge = inspection.LegitimacyVerdict.Contains("LEGITIMATE") ? "🟢" : (inspection.LegitimacyVerdict.Contains("DANGEROUS") ? "🔴" : "🟡");
         var imagePrefix = !string.IsNullOrWhiteSpace(inspection.ImageUrl)
             ? $"<a href=\"{inspection.ImageUrl}\">&#8205;</a>"
@@ -642,7 +736,8 @@ public class TelegramBotService : ITelegramProvider
 
         if (!string.IsNullOrWhiteSpace(inspection.ExtractedGitHubUrl))
         {
-            card += $"🐙 <b>Extracted GitHub Repo:</b> <b><a href=\"{inspection.ExtractedGitHubUrl}\">{inspection.ExtractedGitHubUrl}</a></b>\n\n";
+            card += $"🐙 <b>Extracted GitHub Repo:</b> <b><a href=\"{inspection.ExtractedGitHubUrl}\">{inspection.ExtractedGitHubUrl}</a></b>\n" +
+                    $"💡 <i>SIGNAL extracted this GitHub repository so you can inspect code and run it directly for your tasks.</i>\n\n";
         }
 
         card += $"🛡️ <b>Legitimacy Verdict:</b> <b>{inspection.LegitimacyVerdict}</b> ({inspection.Confidence * 100:F0}% confidence)\n" +
@@ -710,6 +805,13 @@ public class TelegramBotService : ITelegramProvider
     {
         try
         {
+            // Strict English requirement: Ensure zero foreign CJK/untranslated text reaches Telegram
+            if (_translationService.NeedsTranslation(text))
+            {
+                text = await _translationService.TranslateToEnglishAsync(text, "auto", cancellationToken);
+                text = _translationService.SanitizeToEnglish(text);
+            }
+
             var url = $"https://api.telegram.org/bot{_botToken}/sendMessage";
             var payload = new TelegramSendMessagePayload
             {
@@ -884,20 +986,60 @@ public class TelegramBotService : ITelegramProvider
         }
     }
 
-    private static void AppendDigestItem(StringBuilder sb, ContentItem it)
+    private static readonly System.Text.RegularExpressions.Regex GitHubRepoRegex = new(
+        @"https?://(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)",
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    private static string? ExtractGitHubRepoUrl(string? text)
     {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var match = GitHubRepoRegex.Match(text);
+        if (match.Success)
+        {
+            var owner = match.Groups[1].Value.ToLowerInvariant();
+            var repo = match.Groups[2].Value.ToLowerInvariant().TrimEnd('/', '.');
+            string[] reserved = ["features", "pricing", "about", "contact", "login", "signup", "settings", "explore", "trending", "topics", "pulls", "issues", "site"];
+            if (!reserved.Contains(owner) && !reserved.Contains(repo))
+            {
+                return $"https://github.com/{match.Groups[1].Value}/{match.Groups[2].Value.TrimEnd('/', '.')}";
+            }
+        }
+        return null;
+    }
+
+    private async Task AppendDigestItemAsync(StringBuilder sb, ContentItem it, CancellationToken ct)
+    {
+        var title = it.Title;
+        if (_translationService.NeedsTranslation(title))
+        {
+            title = await _translationService.TranslateToEnglishAsync(title, it.Language, ct);
+        }
+        title = _translationService.SanitizeToEnglish(title);
+
         var briefContext = !string.IsNullOrWhiteSpace(it.Summary) ? it.Summary : it.TextContent;
+        if (!string.IsNullOrWhiteSpace(briefContext) && _translationService.NeedsTranslation(briefContext))
+        {
+            briefContext = await _translationService.TranslateToEnglishAsync(briefContext, it.Language, ct);
+        }
+        briefContext = _translationService.SanitizeToEnglish(briefContext);
+
         if (!string.IsNullOrWhiteSpace(briefContext) && briefContext.Length > 160)
         {
             briefContext = briefContext[..157] + "...";
         }
 
         var imageTag = !string.IsNullOrWhiteSpace(it.ImageUrl) ? $" • <a href=\"{it.ImageUrl}\">🖼️ Preview</a>" : "";
-        sb.AppendLine($"• <b><a href=\"{it.Url}\">{WebUtility.HtmlEncode(it.Title)}</a></b>{imageTag}");
+        sb.AppendLine($"• <b><a href=\"{it.Url}\">{WebUtility.HtmlEncode(title)}</a></b>{imageTag}");
         sb.AppendLine($"  📍 <i>{WebUtility.HtmlEncode(it.Source?.Name ?? it.Platform)}</i> | 🏷️ <i>{WebUtility.HtmlEncode(it.Category ?? "General")}</i>");
         if (!string.IsNullOrWhiteSpace(briefContext))
         {
             sb.AppendLine($"  💡 <i>{WebUtility.HtmlEncode(briefContext)}</i>");
+        }
+
+        var git = ExtractGitHubRepoUrl($"{it.Url} {it.Summary} {it.TextContent}");
+        if (!string.IsNullOrWhiteSpace(git))
+        {
+            sb.AppendLine($"  🐙 <b>GitHub:</b> <a href=\"{git}\">{git}</a>");
         }
     }
 

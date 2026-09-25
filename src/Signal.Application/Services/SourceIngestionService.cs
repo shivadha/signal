@@ -78,12 +78,15 @@ public class SourceIngestionService
                     if (_translationService.NeedsTranslation(cleanTitle) || (!string.IsNullOrEmpty(source.Language) && !source.Language.Equals("en", StringComparison.OrdinalIgnoreCase)))
                     {
                         finalTitle = await _translationService.TranslateToEnglishAsync(cleanTitle, source.Language, cancellationToken);
+                        finalTitle = _translationService.SanitizeToEnglish(finalTitle);
+
                         if (!string.IsNullOrWhiteSpace(finalSummary))
                         {
                             var summaryToTranslate = finalSummary.Length > 300 ? finalSummary[..297] + "..." : finalSummary;
                             finalSummary = await _translationService.TranslateToEnglishAsync(summaryToTranslate, source.Language, cancellationToken);
+                            finalSummary = _translationService.SanitizeToEnglish(finalSummary);
                         }
-                        await Task.Delay(100, cancellationToken);
+                        await Task.Delay(150, cancellationToken);
                     }
 
                     var contentItem = new ContentItem
