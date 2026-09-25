@@ -1,0 +1,40 @@
+## .NET Core
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Visual Studio & VS Code
+.vs/
+.vscode/
+*.swp
+*~
+
+## Database & Data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+app_data/
+
+## Logs
+*.log
+logs/
+
+## Environment & Secrets
+.env
+.env.local
+.env.*.local
+appsettings.Production.json
+appsettings.Local.json
+
+## Docker
+.docker/
+
+## OS Files
+.DS_Store
+Thumbs.db
