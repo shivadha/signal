@@ -20,7 +20,7 @@ public class RssSourceProvider : ISourceProvider
     }
 
     public bool CanHandle(SourceType sourceType) =>
-        sourceType is SourceType.Rss or SourceType.OfficialBlog;
+        sourceType is SourceType.Rss or SourceType.OfficialBlog or SourceType.YouTubeChannel or SourceType.Reddit;
 
     public async Task<IReadOnlyList<RawContentItem>> FetchContentAsync(Source source, CancellationToken cancellationToken = default)
     {

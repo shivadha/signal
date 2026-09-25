@@ -70,6 +70,24 @@ public record TelegramInlineKeyboardMarkup
     public List<List<TelegramInlineKeyboardButton>> InlineKeyboard { get; init; } = new();
 }
 
+public record TelegramKeyboardButton
+{
+    [JsonPropertyName("text")]
+    public string Text { get; init; } = string.Empty;
+}
+
+public record TelegramReplyKeyboardMarkup
+{
+    [JsonPropertyName("keyboard")]
+    public List<List<TelegramKeyboardButton>> Keyboard { get; init; } = new();
+
+    [JsonPropertyName("resize_keyboard")]
+    public bool ResizeKeyboard { get; init; } = true;
+
+    [JsonPropertyName("is_persistent")]
+    public bool IsPersistent { get; init; } = true;
+}
+
 public record TelegramSendMessagePayload
 {
     [JsonPropertyName("chat_id")]
@@ -83,6 +101,11 @@ public record TelegramSendMessagePayload
 
     [JsonPropertyName("reply_markup")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public TelegramInlineKeyboardMarkup? ReplyMarkup { get; init; }
+    public object? ReplyMarkup { get; init; }
+}
+
+public record TelegramReplyResult(string Text, object? Markup = null)
+{
+    public static implicit operator TelegramReplyResult(string text) => new(text, null);
 }
 

@@ -167,6 +167,147 @@ public static class SourceSeeder
                 IsOfficial = false,
                 IsActive = true,
                 Language = "en"
+            },
+            new()
+            {
+                Name = "YouTube - Fireship (Code & Tools)",
+                Url = "https://www.youtube.com/@Fireship",
+                FeedUrl = "https://www.youtube.com/feeds/videos.xml?channel_id=UCsBjURrPoezykLs9EqgamOA",
+                SourceType = SourceType.YouTubeChannel,
+                Category = "Developer Tools & Code",
+                TrustTier = TrustTier.Tier3_Specialist,
+                IsOfficial = false,
+                IsActive = true,
+                Language = "en"
+            },
+            new()
+            {
+                Name = "YouTube - Matt Wolfe (AI Tools & News)",
+                Url = "https://www.youtube.com/@mreflow",
+                FeedUrl = "https://www.youtube.com/feeds/videos.xml?channel_id=UCn5WodWzZkKvdz9jJ5G2q5w",
+                SourceType = SourceType.YouTubeChannel,
+                Category = "AI Tools & Opportunities",
+                TrustTier = TrustTier.Tier3_Specialist,
+                IsOfficial = false,
+                IsActive = true,
+                Language = "en"
+            },
+            new()
+            {
+                Name = "YouTube - Y Combinator",
+                Url = "https://www.youtube.com/@ycombinator",
+                FeedUrl = "https://www.youtube.com/feeds/videos.xml?channel_id=UCcefcZRL2oaA_TsBiDDLu-g",
+                SourceType = SourceType.YouTubeChannel,
+                Category = "Tech & Startups",
+                TrustTier = TrustTier.Tier2_Established,
+                IsOfficial = true,
+                IsActive = true,
+                Language = "en"
+            },
+            new()
+            {
+                Name = "YouTube - Two Minute Papers",
+                Url = "https://www.youtube.com/@TwoMinutePapers",
+                FeedUrl = "https://www.youtube.com/feeds/videos.xml?channel_id=UCbfYPyITQ-7l4upoX8nvctg",
+                SourceType = SourceType.YouTubeChannel,
+                Category = "AI Research & Models",
+                TrustTier = TrustTier.Tier3_Specialist,
+                IsOfficial = false,
+                IsActive = true,
+                Language = "en"
+            },
+            new()
+            {
+                Name = "Reddit - r/selfhosted (Open-Source Tools)",
+                Url = "https://www.reddit.com/r/selfhosted/",
+                FeedUrl = "https://www.reddit.com/r/selfhosted/new/.rss",
+                SourceType = SourceType.Reddit,
+                Category = "Developer Tools",
+                TrustTier = TrustTier.Tier4_Community,
+                IsOfficial = false,
+                IsActive = true,
+                Language = "en",
+                Country = "US"
+            },
+            // --- Chinese AI Platforms & Communities (Auto-translated to English) ---
+            new()
+            {
+                Name = "DeepSeek AI (China Official Releases)",
+                Url = "https://github.com/deepseek-ai",
+                FeedUrl = "https://github.com/deepseek-ai/DeepSeek-V2/releases.atom",
+                SourceType = SourceType.OfficialBlog,
+                Category = "Chinese AI & Models",
+                TrustTier = TrustTier.Tier1_Official,
+                IsOfficial = true,
+                IsActive = true,
+                Language = "zh",
+                Country = "CN"
+            },
+            new()
+            {
+                Name = "Qwen AI / Alibaba Cloud (Releases)",
+                Url = "https://github.com/QwenLM",
+                FeedUrl = "https://github.com/QwenLM/Qwen/releases.atom",
+                SourceType = SourceType.OfficialBlog,
+                Category = "Chinese AI & Models",
+                TrustTier = TrustTier.Tier1_Official,
+                IsOfficial = true,
+                IsActive = true,
+                Language = "zh",
+                Country = "CN"
+            },
+            new()
+            {
+                Name = "Solidot (China Tech & Open Source)",
+                Url = "https://www.solidot.org/",
+                FeedUrl = "https://www.solidot.org/index.rss",
+                SourceType = SourceType.Rss,
+                Category = "Chinese Tech & Tools",
+                TrustTier = TrustTier.Tier3_Specialist,
+                IsOfficial = false,
+                IsActive = true,
+                Language = "zh",
+                Country = "CN"
+            },
+            // --- Japanese AI Platforms & Communities (Auto-translated to English) ---
+            new()
+            {
+                Name = "Hatena Bookmark IT & AI (Japan)",
+                Url = "https://b.hatena.ne.jp/hotentry/it",
+                FeedUrl = "https://b.hatena.ne.jp/hotentry/it.rss",
+                SourceType = SourceType.Rss,
+                Category = "Japanese AI & Tech",
+                TrustTier = TrustTier.Tier3_Specialist,
+                IsOfficial = false,
+                IsActive = true,
+                Language = "ja",
+                Country = "JP"
+            },
+            new()
+            {
+                Name = "Qiita AI Developer Feed (Japan)",
+                Url = "https://qiita.com/tags/ai",
+                FeedUrl = "https://qiita.com/tags/ai/feed.atom",
+                SourceType = SourceType.Rss,
+                Category = "Japanese AI & Tech",
+                TrustTier = TrustTier.Tier3_Specialist,
+                IsOfficial = false,
+                IsActive = true,
+                Language = "ja",
+                Country = "JP"
+            },
+            new()
+            {
+                Name = "Zenn AI Engineering Feed (Japan)",
+                Url = "https://zenn.dev/topics/ai",
+                FeedUrl = "https://zenn.dev/topics/ai/feed",
+                SourceType = SourceType.Rss,
+                Category = "Japanese AI & Tech",
+                TrustTier = TrustTier.Tier3_Specialist,
+                IsOfficial = false,
+                IsActive = true,
+                Language = "ja",
+                Country = "JP"
             }
         };
 

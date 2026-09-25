@@ -47,7 +47,7 @@ public class TelegramPollingService : BackgroundService
                         _logger.LogInformation("Received Telegram command '{Command}' from Chat {ChatId}", text, chatId);
 
                         var reply = await botService.HandleCommandAsync(text, db, stoppingToken);
-                        await botService.SendMessageAsync(chatId, reply, null, stoppingToken);
+                        await botService.SendMessageAsync(chatId, reply.Text, reply.Markup, stoppingToken);
                     }
 
                     // Handle inline button callbacks
@@ -56,9 +56,9 @@ public class TelegramPollingService : BackgroundService
                         var chatId = cb.Message.Chat.Id.ToString();
                         _logger.LogInformation("Received Telegram callback '{Data}' from Chat {ChatId}", cb.Data, chatId);
 
-                        var resultText = await botService.HandleCallbackAsync(cb.Data, db, sheets, stoppingToken);
+                        var result = await botService.HandleCallbackAsync(cb.Data, db, sheets, stoppingToken);
                         await botService.AnswerCallbackQueryAsync(cb.Id, "Processed", stoppingToken);
-                        await botService.SendMessageAsync(chatId, resultText, null, stoppingToken);
+                        await botService.SendMessageAsync(chatId, result.Text, result.Markup, stoppingToken);
                     }
                 }
             }

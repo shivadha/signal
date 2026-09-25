@@ -8,6 +8,8 @@ using Signal.Domain.Enums;
 using Signal.Infrastructure.Persistence;
 using Signal.Infrastructure.Providers.AI;
 using Signal.Infrastructure.Providers.Telegram;
+using Signal.Infrastructure.Providers.Translation;
+using Signal.Infrastructure.Providers.Video;
 using Xunit;
 
 namespace Signal.UnitTests;
@@ -41,13 +43,17 @@ public class TelegramBotTests : IDisposable
         var httpClient = new HttpClient();
         var normalizer = new ContentNormalizationService();
         var aiProvider = new NoneAiProvider();
+        var videoInspector = new VideoInspectionService(httpClient, NullLogger<VideoInspectionService>.Instance);
+        var translationService = new FreeTranslationService(httpClient, NullLogger<FreeTranslationService>.Instance);
 
         _botService = new TelegramBotService(
             httpClient,
             config,
             NullLogger<TelegramBotService>.Instance,
             normalizer,
-            aiProvider);
+            aiProvider,
+            videoInspector,
+            translationService);
     }
 
     [Fact]
@@ -57,25 +63,25 @@ public class TelegramBotTests : IDisposable
         var reply = await _botService.HandleCommandAsync("/start", _dbContext);
 
         // Assert
-        Assert.Contains("Welcome to SIGNAL", reply);
-        Assert.Contains("/today", reply);
-        Assert.Contains("/check", reply);
+        Assert.Contains("Welcome to SIGNAL", reply.Text);
+        Assert.Contains("/today", reply.Text);
+        Assert.NotNull(reply.Markup);
     }
 
     [Fact]
-    public async Task HandleCommandAsync_CheckUnseenUrl_IdentifiesNetNew()
+    public async Task HandleCommandAsync_CheckUnseenUrl_IdentifiesAndVerifies()
     {
         // Act
-        var reply = await _botService.HandleCommandAsync("/check https://anthropic.com/claude-3-7-sonnet", _dbContext);
+        var reply = await _botService.HandleCommandAsync("/verify https://anthropic.com/claude-3-7-sonnet", _dbContext);
 
         // Assert
-        Assert.Contains("SIGNAL CHECK", reply);
-        Assert.Contains("Already Seen:</b> NO", reply);
-        Assert.Contains("Net-new link", reply);
+        Assert.Contains("VERIFICATION", reply.Text);
+        Assert.Contains("Legitimacy Verdict", reply.Text);
+        Assert.NotNull(reply.Markup);
     }
 
     [Fact]
-    public async Task HandleCommandAsync_CheckExistingUrl_DetectsDuplicate()
+    public async Task HandleCommandAsync_CheckExistingUrl_UpdatesTranscriptIfAvailable()
     {
         // Arrange
         var source = new Source
@@ -101,14 +107,12 @@ public class TelegramBotTests : IDisposable
         await _dbContext.SaveChangesAsync();
 
         // Act
-        var reply = await _botService.HandleCommandAsync("/check https://openai.com/news/gpt-5?utm_source=twitter", _dbContext);
+        var reply = await _botService.HandleCommandAsync("/verify https://openai.com/news/gpt-5?utm_source=twitter", _dbContext);
 
         // Assert
-        Assert.Contains("SIGNAL CHECK", reply);
-        Assert.Contains("Already Seen:</b> YES", reply);
-        Assert.Contains("No new notification required", reply);
+        Assert.Contains("VERIFICATION", reply.Text);
+        Assert.Contains("Legitimacy Verdict", reply.Text);
     }
-
 
     public void Dispose()
     {

@@ -92,7 +92,7 @@ public class Worker : BackgroundService
         TelegramBotService botService,
         CancellationToken ct)
     {
-        var oppContentItemIds = new HashSet<Guid>();
+        var handledItemIds = new HashSet<Guid>();
 
         // 1. Detect and dispatch high-value developer opportunities
         int oppAlertsSent = 0;
@@ -103,7 +103,7 @@ public class Worker : BackgroundService
                 var opp = await opportunityDetector.EvaluateAndCreateOpportunityAsync(item, ct);
                 if (opp != null)
                 {
-                    oppContentItemIds.Add(item.Id);
+                    handledItemIds.Add(item.Id);
                     if (oppAlertsSent < 3) // Cap at 3 per cycle to prevent notification fatigue
                     {
                         await botService.SendOpportunityCardAsync(opp, ct);
@@ -118,9 +118,32 @@ public class Worker : BackgroundService
             }
         }
 
-        // 2. Dispatch High-Signal Digest for non-opportunity discoveries
+        // 2. Detect and dispatch developer tools & GitHub repos
+        int toolAlertsSent = 0;
+        var toolCandidates = newItems
+            .Where(it => !handledItemIds.Contains(it.Id))
+            .Where(it => it.Url.Contains("github.com")
+                      || it.Platform == "GitHub"
+                      || (it.Category != null && it.Category.Contains("Tool"))
+                      || it.Title.ToLower().Contains("cli")
+                      || it.Title.ToLower().Contains("library")
+                      || it.Title.ToLower().Contains("open-source"))
+            .ToList();
+
+        foreach (var tool in toolCandidates)
+        {
+            handledItemIds.Add(tool.Id);
+            if (toolAlertsSent < 2) // Cap at 2 tool cards per cycle
+            {
+                await botService.SendToolCardAsync(tool, ct);
+                toolAlertsSent++;
+                await Task.Delay(500, ct);
+            }
+        }
+
+        // 3. Dispatch High-Signal Digest for remaining non-opportunity discoveries
         var nonOppItems = newItems
-            .Where(it => !oppContentItemIds.Contains(it.Id))
+            .Where(it => !handledItemIds.Contains(it.Id))
             .OrderByDescending(it => it.PublishedAt)
             .Take(5)
             .ToList();

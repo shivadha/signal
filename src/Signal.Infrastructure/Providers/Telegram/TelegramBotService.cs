@@ -18,6 +18,8 @@ public class TelegramBotService : ITelegramProvider
     private readonly ILogger<TelegramBotService> _logger;
     private readonly IContentNormalizer _normalizer;
     private readonly IAIProvider _aiProvider;
+    private readonly IVideoInspectionService _videoInspector;
+    private readonly ITranslationService _translationService;
     private readonly string? _botToken;
     private readonly string? _defaultChatId;
 
@@ -26,13 +28,17 @@ public class TelegramBotService : ITelegramProvider
         IConfiguration config,
         ILogger<TelegramBotService> logger,
         IContentNormalizer normalizer,
-        IAIProvider aiProvider)
+        IAIProvider aiProvider,
+        IVideoInspectionService videoInspector,
+        ITranslationService translationService)
     {
         _httpClient = httpClient;
         _config = config;
         _logger = logger;
         _normalizer = normalizer;
         _aiProvider = aiProvider;
+        _videoInspector = videoInspector;
+        _translationService = translationService;
         _botToken = _config["TELEGRAM_BOT_TOKEN"];
         _defaultChatId = _config["TELEGRAM_CHAT_ID"];
     }
@@ -83,45 +89,159 @@ public class TelegramBotService : ITelegramProvider
         return await SendMessageAsync(_defaultChatId!, text, keyboard, cancellationToken);
     }
 
-    public async Task<string> HandleCommandAsync(
+    public async Task<bool> SendToolCardAsync(ContentItem item, CancellationToken cancellationToken = default)
+    {
+        var text = $"🛠️ <b>NEW DEVELOPER TOOL / REPOSITORY</b>\n\n" +
+                   $"<b><a href=\"{item.Url}\">{WebUtility.HtmlEncode(item.Title)}</a></b>\n\n" +
+                   $"📍 <b>Platform:</b> {WebUtility.HtmlEncode(item.Platform)}\n" +
+                   $"🏷️ <b>Category:</b> {WebUtility.HtmlEncode(item.Category ?? "Developer Tools")}\n\n" +
+                   $"<b>Why Useful:</b>\n" +
+                   $"{WebUtility.HtmlEncode(item.Summary ?? item.TextContent ?? "Productivity accelerator.")}";
+
+        var keyboard = new TelegramInlineKeyboardMarkup
+        {
+            InlineKeyboard = new List<List<TelegramInlineKeyboardButton>>
+            {
+                new()
+                {
+                    new() { Text = "🔗 Open Repository / Link", Url = item.Url }
+                },
+                new()
+                {
+                    new() { Text = "⭐ SAVE TO GOOGLE SHEET (TOOLS)", CallbackData = $"savetool:{item.Id}" }
+                }
+            }
+        };
+
+        if (!IsConfigured)
+        {
+            _logger.LogInformation("[Telegram MOCK Tool Card]:\n{Text}", text);
+            return true;
+        }
+
+        return await SendMessageAsync(_defaultChatId!, text, keyboard, cancellationToken);
+    }
+
+    public static TelegramReplyKeyboardMarkup CreateMainNavigationKeyboard() => new()
+    {
+        Keyboard = new List<List<TelegramKeyboardButton>>
+        {
+            new()
+            {
+                new() { Text = "🔥 Today" },
+                new() { Text = "💰 Offers" },
+                new() { Text = "🛠️ Tools" }
+            },
+            new()
+            {
+                new() { Text = "🌏 Global AI" },
+                new() { Text = "🛡️ Verify URL" },
+                new() { Text = "📖 Help" }
+            }
+        },
+        ResizeKeyboard = true,
+        IsPersistent = true
+    };
+
+    public async Task<TelegramReplyResult> HandleCommandAsync(
         string commandText,
         ISignalDbContext db,
         CancellationToken cancellationToken = default)
     {
         var trimmed = commandText.Trim();
-        var isStart = trimmed.Equals("/start", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("start", StringComparison.OrdinalIgnoreCase);
-        var isHelp = trimmed.Equals("/help", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("help", StringComparison.OrdinalIgnoreCase);
-        var isToday = trimmed.Equals("/today", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("today", StringComparison.OrdinalIgnoreCase);
-        var isOffers = trimmed.Equals("/offers", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("offers", StringComparison.OrdinalIgnoreCase);
+        var isStart = trimmed.Equals("/start", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("start", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("/menu", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("menu", StringComparison.OrdinalIgnoreCase);
+        var isHelp = trimmed.Equals("/help", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("help", StringComparison.OrdinalIgnoreCase)
+                  || trimmed.Equals("📖 help", StringComparison.OrdinalIgnoreCase);
+        var isToday = trimmed.Equals("/today", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("today", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("🔥 today", StringComparison.OrdinalIgnoreCase);
+        var isOffers = trimmed.Equals("/offers", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("offers", StringComparison.OrdinalIgnoreCase)
+                    || trimmed.Equals("offer", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("💰 offers", StringComparison.OrdinalIgnoreCase);
+        var isTools = trimmed.Equals("/tools", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("tools", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("🛠️ tools", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("/github", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("github", StringComparison.OrdinalIgnoreCase);
+        var isGlobal = trimmed.Equals("/global", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("global", StringComparison.OrdinalIgnoreCase)
+                    || trimmed.Equals("/intl", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("intl", StringComparison.OrdinalIgnoreCase)
+                    || trimmed.Equals("🌏 global ai", StringComparison.OrdinalIgnoreCase);
         var isSaved = trimmed.Equals("/saved", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("saved", StringComparison.OrdinalIgnoreCase);
-        var isCheck = trimmed.StartsWith("/check", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("check ", StringComparison.OrdinalIgnoreCase);
+        var isTranscript = trimmed.StartsWith("/transcript", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("transcript ", StringComparison.OrdinalIgnoreCase);
+        var isCheck = trimmed.StartsWith("/check", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("check ", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.StartsWith("/verify", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("verify ", StringComparison.OrdinalIgnoreCase)
+                   || trimmed.Equals("🛡️ verify url", StringComparison.OrdinalIgnoreCase);
         var isRawUrl = trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
 
         if (isStart)
         {
-            return "👋 <b>Welcome to SIGNAL</b>\n" +
-                   "<i>Your personal information firewall. Signal over noise.</i>\n\n" +
-                   "🟢 <b>Status:</b> 24/7 Active\n" +
-                   "⏱️ <b>Auto-Sync:</b> Every 30 minutes across all days\n" +
-                   "📡 <b>Monitored:</b> OpenAI, Anthropic, Google, Hugging Face, GitHub, MIT Tech, YouTube\n\n" +
-                   "<b>Available Commands:</b>\n" +
-                   "• <code>/today</code> — Latest discoveries with summaries & links\n" +
-                   "• <code>/offers</code> — Free developer tiers, credits & discounts\n" +
-                   "• <code>/saved</code> — Items approved or saved to your library\n" +
-                   "• <code>/check &lt;url&gt;</code> — Verify link, detect duplicates & evaluate claims\n" +
-                   "• <code>/help</code> — Full operational documentation\n\n" +
-                   "💡 <i>Tip: You can send commands with or without the slash (e.g. <code>today</code> or <code>offers</code>).</i>";
+            var welcome = "👋 <b>Welcome to SIGNAL Intelligence</b>\n" +
+                          "<i>Your personal information firewall. Signal over noise.</i>\n\n" +
+                          "🟢 <b>Status:</b> 24/7 Active Autonomous Ingestion\n" +
+                          "⏱️ <b>Auto-Sync:</b> Runs every 30 minutes (US, China, Japan feeds)\n" +
+                          "🛡️ <b>Video & Reel Legitimacy:</b> Scam & clickbait detector for YouTube & Instagram\n\n" +
+                          "<b>Interactive Controls:</b>\n" +
+                          "• <code>/today</code> — Top curated discoveries with summaries & links\n" +
+                          "• <code>/offers</code> — Free AI credits, API grants (Claude, OpenAI, Gemini, Muse, Cursor)\n" +
+                          "• <code>/tools</code> — Trending open-source developer tools, CLI utilities & GitHub repos\n" +
+                          "• <code>/global</code> — Chinese (DeepSeek, Qwen) & Japanese (Qiita, Hatena) AI news translated to English\n" +
+                          "• <code>/verify &lt;url&gt;</code> — Extract transcript & check if YouTube/Instagram video is legit or scam\n" +
+                          "• <code>/transcript &lt;url&gt;</code> — Extract timestamped transcript or audio script\n" +
+                          "• <code>/saved</code> — View your saved library\n\n" +
+                          "💡 <i>Tip: You can paste ANY YouTube, Reel, or Article link directly into chat to inspect it!</i>";
+
+            return new TelegramReplyResult(welcome, CreateMainNavigationKeyboard());
         }
 
         if (isHelp)
         {
-            return "📖 <b>SIGNAL Bot Commands & Operation</b>\n\n" +
-                   "• <code>/today</code> — High-signal curated news with summaries & links\n" +
-                   "• <code>/offers</code> — Free tiers, API credits, developer discounts\n" +
-                   "• <code>/saved</code> — Items saved in personal library\n" +
-                   "• <code>/check &lt;url&gt;</code> — Paste any YouTube, Reel, or Article link\n\n" +
-                   "🔄 <b>Automatic Crawl:</b> Runs every 30 minutes, 24/7. When new high-signal items or opportunities are discovered, you receive an instant alert!\n\n" +
-                   "💡 <i>Tip: Only when you tap <b>[✅ APPROVE & SAVE]</b> does an item write to Google Sheets.</i>";
+            var help = "📖 <b>SIGNAL Bot Commands & Operation</b>\n\n" +
+                       "• <code>/today</code> — High-signal curated news with summaries & links\n" +
+                       "• <code>/offers</code> — Free credits, grants & tiers (Claude, OpenAI, Gemini, Muse, Cursor, etc.)\n" +
+                       "• <code>/tools</code> — Open-source developer tools, CLI utilities & GitHub repos\n" +
+                       "• <code>/global</code> — Chinese & Japanese platforms translated to English\n" +
+                       "• <code>/verify &lt;url&gt;</code> — Verify YouTube, Reel, or Article link & check legitimacy\n" +
+                       "• <code>/transcript &lt;url&gt;</code> — Pull full video/reel transcript\n" +
+                       "• <code>/saved</code> — Items saved in personal library\n\n" +
+                       "🔄 <b>Automatic Crawl:</b> Runs every 30 minutes, 24/7. When new high-signal items, opportunities, or tools are discovered, you receive an instant alert!\n\n" +
+                       "📊 <b>Google Sheets Integration:</b>\n" +
+                       "• Opportunities save to the <b>'Opportunities'</b> sheet tab.\n" +
+                       "• GitHub tools save to the dedicated <b>'Tools'</b> sheet tab.\n\n" +
+                       "💡 <i>Tap the menu buttons below for instant 1-tap navigation.</i>";
+
+            return new TelegramReplyResult(help, CreateMainNavigationKeyboard());
+        }
+
+        if (isCheck && trimmed.Equals("🛡️ verify url", StringComparison.OrdinalIgnoreCase))
+        {
+            return "🛡️ <b>VERIFY VIDEO, REEL OR ARTICLE LINK</b>\n\n" +
+                   "Paste any YouTube video link, Instagram Reel, TikTok, GitHub repo, or news URL directly into the chat.\n\n" +
+                   "SIGNAL will automatically:\n" +
+                   "1. 🎙️ <b>Extract full transcript & captions</b>\n" +
+                   "2. 🛡️ <b>Detect scams, malware, & fake bypass claims</b>\n" +
+                   "3. 🔍 <b>Verify official documentation</b>\n" +
+                   "4. 💾 <b>Save to your database & Google Sheet</b>";
+        }
+
+        if (isTranscript)
+        {
+            var parts = trimmed.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+            {
+                return "⚠️ <b>Usage:</b> <code>/transcript &lt;url&gt;</code>\nExample: <code>/transcript https://www.youtube.com/watch?v=...</code>";
+            }
+            var targetUrl = parts[1].Trim();
+            var inspection = await _videoInspector.InspectUrlAsync(targetUrl, cancellationToken);
+            var transText = !string.IsNullOrWhiteSpace(inspection.Transcript)
+                ? inspection.Transcript
+                : inspection.Description ?? "No transcript or audio content found.";
+
+            if (transText.Length > 3700)
+            {
+                transText = transText[..3690] + "\n\n<i>[...Transcript continues - truncated for Telegram length limit]</i>";
+            }
+
+            return $"🎙️ <b>VIDEO & AUDIO TRANSCRIPT</b>\n" +
+                   $"<b><a href=\"{inspection.Url}\">{WebUtility.HtmlEncode(inspection.Title)}</a></b>\n" +
+                   $"📍 <i>{inspection.Platform}</i> | 👤 <i>{WebUtility.HtmlEncode(inspection.Author ?? "Creator")}</i>\n\n" +
+                   $"{WebUtility.HtmlEncode(transText)}";
         }
 
         if (isCheck || isRawUrl)
@@ -136,7 +256,7 @@ public class TelegramBotService : ITelegramProvider
                 var parts = trimmed.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length < 2)
                 {
-                    return "⚠️ <b>Usage:</b> <code>/check &lt;url&gt;</code>\nExample: <code>/check https://openai.com/news/swarm/</code>";
+                    return "⚠️ <b>Usage:</b> <code>/verify &lt;url&gt;</code>\nExample: <code>/verify https://www.youtube.com/watch?v=...</code>";
                 }
                 url = parts[1].Trim();
             }
@@ -157,7 +277,6 @@ public class TelegramBotService : ITelegramProvider
 
             if (items.Count == 0)
             {
-                // Fallback to top 5 most recent discoveries
                 items = await db.ContentItems
                     .AsNoTracking()
                     .Include(c => c.Source)
@@ -184,7 +303,7 @@ public class TelegramBotService : ITelegramProvider
                 var timeAgo = FormatRelativeTime(it.PublishedAt);
 
                 response += $"<b>{i + 1}. <a href=\"{it.Url}\">{WebUtility.HtmlEncode(it.Title)}</a></b>\n" +
-                            $"   🏢 <b>Source:</b> {WebUtility.HtmlEncode(it.Source.Name)} | 🕒 <i>{timeAgo}</i>\n" +
+                            $"   🏢 <b>Source:</b> {WebUtility.HtmlEncode(it.Source?.Name ?? it.Platform)} | 🕒 <i>{timeAgo}</i>\n" +
                             $"   🏷️ <b>Category:</b> {WebUtility.HtmlEncode(it.Category ?? "General")}\n";
 
                 if (!string.IsNullOrWhiteSpace(excerpt))
@@ -207,18 +326,120 @@ public class TelegramBotService : ITelegramProvider
 
             if (opportunities.Count == 0)
             {
-                return "💰 <b>ACTIVE DEVELOPER OPPORTUNITIES</b>\nNo unreviewed opportunities in the queue right now. All caught up!\n\n<i>Auto-detection checks new feeds every 30 minutes.</i>";
+                return "💰 <b>ACTIVE DEVELOPER OPPORTUNITIES & CREDITS</b>\nNo unreviewed opportunities in the queue right now. All caught up!\n\n<i>Auto-detection checks new feeds every 30 minutes for Claude, OpenAI, Gemini, Muse, Cursor, and open-source grants.</i>";
             }
 
-            var response = "💰 <b>ACTIVE DEVELOPER OPPORTUNITIES</b>\n\n";
+            var response = "💰 <b>ACTIVE DEVELOPER OPPORTUNITIES & CREDITS</b>\n\n";
             for (int i = 0; i < opportunities.Count; i++)
             {
                 var op = opportunities[i];
                 response += $"<b>{i + 1}. {WebUtility.HtmlEncode(op.Title)}</b>\n" +
-                            $"   🎁 <b>Value:</b> {WebUtility.HtmlEncode(op.Value ?? "Free Tier")}\n" +
+                            $"   🎁 <b>Value / Grant:</b> {WebUtility.HtmlEncode(op.Value ?? "Free Tier / Credits")}\n" +
                             $"   👥 <b>Eligibility:</b> {WebUtility.HtmlEncode(op.Eligibility ?? "All developers")}\n" +
                             $"   ⏳ <b>Expires:</b> {(op.ExpiryDate.HasValue ? op.ExpiryDate.Value.ToString("dd MMM yyyy") : "Ongoing")}\n" +
                             $"   🔗 <a href=\"{op.OfficialSourceUrl ?? "https://github.com/shivadha/signal"}\">Official Link</a>\n\n";
+            }
+            return response;
+        }
+
+        if (isTools)
+        {
+            var tools = await db.ContentItems
+                .AsNoTracking()
+                .Include(c => c.Source)
+                .Where(c => c.Url.Contains("github.com") 
+                         || c.Platform == "GitHub" 
+                         || (c.Category != null && (c.Category.Contains("Tool") || c.Category.Contains("Developer"))) 
+                         || c.Title.ToLower().Contains("tool")
+                         || c.Title.ToLower().Contains("cli")
+                         || c.Title.ToLower().Contains("library")
+                         || c.Title.ToLower().Contains("open-source"))
+                .OrderByDescending(c => c.PublishedAt)
+                .Take(5)
+                .ToListAsync(cancellationToken);
+
+            if (tools.Count == 0)
+            {
+                return "🛠️ <b>DEVELOPER TOOLS & GITHUB REPOSITORIES</b>\nNo tools recorded yet. Background monitoring is actively scanning feeds!";
+            }
+
+            var response = "🛠️ <b>NEW DEVELOPER TOOLS & GITHUB REPOSITORIES</b>\n" +
+                           "<i>Trending open-source AI utilities, CLI tools & productivity accelerators:</i>\n\n";
+
+            for (int i = 0; i < tools.Count; i++)
+            {
+                var t = tools[i];
+                var desc = !string.IsNullOrWhiteSpace(t.Summary) ? t.Summary : t.TextContent;
+                if (!string.IsNullOrWhiteSpace(desc) && desc.Length > 200)
+                    desc = desc.Substring(0, 197) + "...";
+
+                var timeAgo = FormatRelativeTime(t.PublishedAt);
+
+                response += $"<b>{i + 1}. <a href=\"{t.Url}\">{WebUtility.HtmlEncode(t.Title)}</a></b>\n" +
+                            $"   🏷️ <b>Category:</b> {WebUtility.HtmlEncode(t.Category ?? "Developer Tool")} | 🕒 <i>{timeAgo}</i>\n";
+
+                if (!string.IsNullOrWhiteSpace(desc))
+                {
+                    response += $"   📝 <b>Details:</b> <i>{WebUtility.HtmlEncode(desc)}</i>\n";
+                }
+                response += "\n";
+            }
+            return response;
+        }
+
+        if (isGlobal)
+        {
+            var globalItems = await db.ContentItems
+                .AsNoTracking()
+                .Include(c => c.Source)
+                .Where(c => c.Source != null && (c.Source.Country == "CN" || c.Source.Country == "JP" || c.Source.Language != "en" || (c.Category != null && (c.Category.Contains("Chinese") || c.Category.Contains("Japanese")))))
+                .OrderByDescending(c => c.PublishedAt)
+                .Take(5)
+                .ToListAsync(cancellationToken);
+
+            if (globalItems.Count == 0)
+            {
+                globalItems = await db.ContentItems
+                    .AsNoTracking()
+                    .Include(c => c.Source)
+                    .Where(c => c.Platform == "DeepSeek" || c.Platform == "Qwen" || c.Title.Contains("DeepSeek") || c.Title.Contains("Qwen") || c.Title.Contains("China") || c.Title.Contains("Japan"))
+                    .OrderByDescending(c => c.PublishedAt)
+                    .Take(5)
+                    .ToListAsync(cancellationToken);
+            }
+
+            if (globalItems.Count == 0)
+            {
+                return "🌏 <b>GLOBAL AI INTELLIGENCE (CN / JP / US)</b>\nNo international items indexed yet. Crawlers are fetching Chinese & Japanese feeds on the 30-minute interval.";
+            }
+
+            var response = "🌏 <b>GLOBAL AI INTELLIGENCE (CN / JP / US)</b>\n" +
+                           "<i>Latest international releases, auto-translated to English:</i>\n\n";
+
+            for (int i = 0; i < globalItems.Count; i++)
+            {
+                var g = globalItems[i];
+                var flag = g.Source?.Country switch
+                {
+                    "CN" => "🇨🇳",
+                    "JP" => "🇯🇵",
+                    _ => "🌐"
+                };
+
+                var desc = !string.IsNullOrWhiteSpace(g.Summary) ? g.Summary : g.TextContent;
+                if (!string.IsNullOrWhiteSpace(desc) && desc.Length > 200)
+                    desc = desc.Substring(0, 197) + "...";
+
+                var timeAgo = FormatRelativeTime(g.PublishedAt);
+
+                response += $"<b>{i + 1}. {flag} <a href=\"{g.Url}\">{WebUtility.HtmlEncode(g.Title)}</a></b>\n" +
+                            $"   🏢 <b>Source:</b> {WebUtility.HtmlEncode(g.Source?.Name ?? g.Platform)} | 🕒 <i>{timeAgo}</i>\n";
+
+                if (!string.IsNullOrWhiteSpace(desc))
+                {
+                    response += $"   📝 <b>English Translation:</b> <i>{WebUtility.HtmlEncode(desc)}</i>\n";
+                }
+                response += "\n";
             }
             return response;
         }
@@ -259,40 +480,110 @@ public class TelegramBotService : ITelegramProvider
         return dt.ToString("dd MMM yyyy");
     }
 
-
-    private async Task<string> HandleCheckUrlAsync(string url, ISignalDbContext db, CancellationToken ct)
+    private async Task<TelegramReplyResult> HandleCheckUrlAsync(string url, ISignalDbContext db, CancellationToken ct)
     {
         var canonicalUrl = _normalizer.CanonicalizeUrl(url);
 
-        // Check exact or canonical match in DB
+        // Run deep inspection (transcript + legitimacy + claims + risks)
+        var inspection = await _videoInspector.InspectUrlAsync(url, ct);
+
+        // Check if item already exists in database
         var existing = await db.ContentItems
-            .AsNoTracking()
             .Include(c => c.Source)
             .FirstOrDefaultAsync(c => c.Url == url || c.CanonicalUrl == canonicalUrl, ct);
 
-        // Run analysis on title/url
-        var analysis = await _aiProvider.AnalyzeAsync(url, null, ct);
-
+        ContentItem itemToTrack;
         if (existing != null)
         {
-            return $"🔎 <b>SIGNAL CHECK</b>\n\n" +
-                   $"<b>Story:</b> {existing.Title}\n" +
-                   $"<b>Already Seen:</b> YES (via {existing.Source.Name})\n" +
-                   $"<b>First Discovered:</b> {existing.DiscoveredAt:dd MMM yyyy}\n" +
-                   $"<b>New Information:</b> None (Duplicate entry)\n" +
-                   $"<b>Verification:</b> Verified\n" +
-                   $"<b>Relevance:</b> {(analysis.RelevanceScore >= 0.7 ? "HIGH" : "MEDIUM")}\n\n" +
-                   $"<b>Recommendation:</b> No new notification required.";
+            itemToTrack = existing;
+            if (string.IsNullOrWhiteSpace(itemToTrack.TextContent) && !string.IsNullOrWhiteSpace(inspection.Transcript))
+            {
+                itemToTrack.TextContent = inspection.Transcript;
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        else
+        {
+            var defaultSource = await db.Sources.FirstOrDefaultAsync(s => s.Name == "Direct Link / Inspection", ct);
+            if (defaultSource == null)
+            {
+                defaultSource = new Source
+                {
+                    Name = "Direct Link / Inspection",
+                    Url = "https://signal.local",
+                    SourceType = SourceType.Social,
+                    Category = "Manual Inspection",
+                    TrustTier = TrustTier.Tier5_Unknown,
+                    IsActive = true
+                };
+                db.Sources.Add(defaultSource);
+                await db.SaveChangesAsync(ct);
+            }
+
+            // Persist inspected item into SQLite database
+            itemToTrack = new ContentItem
+            {
+                SourceId = defaultSource.Id,
+                Title = inspection.Title,
+                Url = url,
+                CanonicalUrl = canonicalUrl,
+                Author = inspection.Author,
+                Platform = inspection.Platform,
+                Category = inspection.IsLegit ? "Verified Video / Tool" : "Suspicious Content",
+                Summary = inspection.Summary,
+                TextContent = inspection.Transcript,
+                DiscoveredAt = DateTimeOffset.UtcNow,
+                PublishedAt = DateTimeOffset.UtcNow,
+                ContentHash = _normalizer.ComputeContentHash(inspection.Title, inspection.Transcript ?? ""),
+                Language = "en",
+                IsDuplicate = false
+            };
+
+            db.ContentItems.Add(itemToTrack);
+            await db.SaveChangesAsync(ct);
         }
 
-        return $"🔎 <b>SIGNAL CHECK</b>\n\n" +
-               $"<b>URL:</b> {url}\n" +
-               $"<b>Canonical:</b> {canonicalUrl}\n" +
-               $"<b>Already Seen:</b> NO (Net-new link)\n" +
-               $"<b>Rage-Bait Score:</b> {(analysis.RageBaitScore > 0.5 ? "⚠️ HIGH" : "✅ LOW")}\n" +
-               $"<b>Relevance Score:</b> {(analysis.RelevanceScore >= 0.7 ? "🔥 HIGH" : "LOW")}\n" +
-               $"<b>Opportunity Detected:</b> {(analysis.IsOpportunity ? "YES (" + analysis.OpportunityType + ")" : "NO")}\n\n" +
-               $"<b>Recommendation:</b> {(analysis.IsRelevant ? "Valid topic for queue" : "Filter as low relevance")}";
+        var badge = inspection.LegitimacyVerdict.Contains("LEGITIMATE") ? "🟢" : (inspection.LegitimacyVerdict.Contains("DANGEROUS") ? "🔴" : "🟡");
+
+        var card = $"{badge} <b>SIGNAL VIDEO & LINK VERIFICATION</b>\n\n" +
+                   $"<b><a href=\"{url}\">{WebUtility.HtmlEncode(inspection.Title)}</a></b>\n" +
+                   $"📍 <b>Platform:</b> {inspection.Platform} | 👤 <b>Creator:</b> {WebUtility.HtmlEncode(inspection.Author ?? "Unknown")}\n\n" +
+                   $"🛡️ <b>Legitimacy Verdict:</b> <b>{inspection.LegitimacyVerdict}</b> ({inspection.Confidence * 100:F0}% confidence)\n" +
+                   $"💡 <b>Analysis:</b> {WebUtility.HtmlEncode(inspection.SafeRecommendation ?? "Analysis completed.")}\n\n";
+
+        if (inspection.Claims.Count > 0)
+        {
+            card += "📋 <b>Key Claims Detected:</b>\n" + string.Join("\n", inspection.Claims.Select(c => $"• {WebUtility.HtmlEncode(c)}")) + "\n\n";
+        }
+
+        if (inspection.RiskFactors.Count > 0)
+        {
+            card += "⚠️ <b>Risk Factors / Red Flags:</b>\n" + string.Join("\n", inspection.RiskFactors.Select(r => $"• {WebUtility.HtmlEncode(r)}")) + "\n\n";
+        }
+
+        if (!string.IsNullOrWhiteSpace(inspection.Transcript))
+        {
+            var preview = inspection.Transcript.Length > 240 ? inspection.Transcript[..237] + "..." : inspection.Transcript;
+            card += $"🎙️ <b>Transcript / Audio Extract:</b>\n<i>{WebUtility.HtmlEncode(preview)}</i>\n\n";
+        }
+
+        var keyboard = new TelegramInlineKeyboardMarkup
+        {
+            InlineKeyboard = new List<List<TelegramInlineKeyboardButton>>
+            {
+                new()
+                {
+                    new() { Text = "📑 Read Full Transcript", CallbackData = $"transcript:{itemToTrack.Id}" },
+                    new() { Text = "⭐ Save to Sheet", CallbackData = $"savetool:{itemToTrack.Id}" }
+                },
+                new()
+                {
+                    new() { Text = "🔗 Open Video / Link", Url = url }
+                }
+            }
+        };
+
+        return new TelegramReplyResult(card, keyboard);
     }
 
     private static string FormatOpportunityHtml(Opportunity op)
@@ -311,7 +602,7 @@ public class TelegramBotService : ITelegramProvider
     public async Task<bool> SendMessageAsync(
         string chatId,
         string text,
-        TelegramInlineKeyboardMarkup? keyboard = null,
+        object? keyboard = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -393,7 +684,7 @@ public class TelegramBotService : ITelegramProvider
         }
     }
 
-    public async Task<string> HandleCallbackAsync(
+    public async Task<TelegramReplyResult> HandleCallbackAsync(
         string callbackData,
         ISignalDbContext db,
         IGoogleSheetsProvider sheetsProvider,
@@ -403,14 +694,54 @@ public class TelegramBotService : ITelegramProvider
         var action = parts[0].ToLowerInvariant();
         var idStr = parts.Length > 1 ? parts[1] : string.Empty;
 
-        if (!Guid.TryParse(idStr, out var opportunityId))
+        if (!Guid.TryParse(idStr, out var entityId))
         {
-            return "⚠️ Invalid opportunity reference.";
+            return "⚠️ Invalid item reference.";
+        }
+
+        if (action == "transcript")
+        {
+            var item = await db.ContentItems.FirstOrDefaultAsync(c => c.Id == entityId, cancellationToken);
+            if (item == null)
+                return "⚠️ Item not found in database.";
+
+            var transcriptText = !string.IsNullOrWhiteSpace(item.TextContent)
+                ? item.TextContent
+                : item.Summary ?? "No transcript text available.";
+
+            if (transcriptText.Length > 3700)
+            {
+                transcriptText = transcriptText[..3690] + "\n\n<i>[...Transcript continues - truncated for Telegram length limit]</i>";
+            }
+
+            return $"🎙️ <b>FULL TRANSCRIPT & AUDIO SCRIPT</b>\n\n" +
+                   $"<b><a href=\"{item.Url}\">{WebUtility.HtmlEncode(item.Title)}</a></b>\n" +
+                   $"📍 <b>Platform:</b> {WebUtility.HtmlEncode(item.Platform)}\n\n" +
+                   $"{WebUtility.HtmlEncode(transcriptText)}";
+        }
+
+        if (action == "savetool")
+        {
+            var toolItem = await db.ContentItems.FirstOrDefaultAsync(c => c.Id == entityId, cancellationToken);
+            if (toolItem == null)
+                return "⚠️ Tool item not found.";
+
+            var result = await sheetsProvider.SyncToolRepoAsync(
+                toolItem.Title,
+                toolItem.Url,
+                toolItem.Summary ?? toolItem.TextContent,
+                toolItem.Category ?? "Developer Tools",
+                0.9,
+                cancellationToken);
+
+            return result.Success && result.RowIndex.HasValue
+                ? $"⭐ <b>SAVED TO GOOGLE SHEET (TOOLS)</b>\nAdded <b>{WebUtility.HtmlEncode(toolItem.Title)}</b> to the <b>'Tools'</b> tab at Row #{result.RowIndex}."
+                : $"⭐ <b>SAVED LOCALLY</b>\nTool recorded in local offline queue: {result.ErrorMessage ?? "Pending sync"}";
         }
 
         var opp = await db.Opportunities
             .Include(o => o.ContentItem)
-            .FirstOrDefaultAsync(o => o.Id == opportunityId, cancellationToken);
+            .FirstOrDefaultAsync(o => o.Id == entityId, cancellationToken);
 
         if (opp == null)
             return "⚠️ Opportunity not found or expired.";

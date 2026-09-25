@@ -12,6 +12,7 @@ public class SourceIngestionService
     private readonly IEnumerable<ISourceProvider> _sourceProviders;
     private readonly IContentNormalizer _normalizer;
     private readonly IDuplicateDetector _duplicateDetector;
+    private readonly ITranslationService _translationService;
     private readonly ILogger<SourceIngestionService> _logger;
 
     public SourceIngestionService(
@@ -19,12 +20,14 @@ public class SourceIngestionService
         IEnumerable<ISourceProvider> sourceProviders,
         IContentNormalizer normalizer,
         IDuplicateDetector duplicateDetector,
+        ITranslationService translationService,
         ILogger<SourceIngestionService> logger)
     {
         _dbContext = dbContext;
         _sourceProviders = sourceProviders;
         _normalizer = normalizer;
         _duplicateDetector = duplicateDetector;
+        _translationService = translationService;
         _logger = logger;
     }
 
@@ -69,11 +72,23 @@ public class SourceIngestionService
                         continue;
                     }
 
+                    var finalTitle = cleanTitle;
+                    var finalSummary = _normalizer.CleanText(raw.Summary);
+
+                    if (_translationService.NeedsTranslation(cleanTitle) || (source.Language != null && source.Language != "en"))
+                    {
+                        finalTitle = await _translationService.TranslateToEnglishAsync(cleanTitle, source.Language, cancellationToken);
+                        if (!string.IsNullOrWhiteSpace(finalSummary))
+                        {
+                            finalSummary = await _translationService.TranslateToEnglishAsync(finalSummary, source.Language, cancellationToken);
+                        }
+                    }
+
                     var contentItem = new ContentItem
                     {
                         SourceId = source.Id,
                         Platform = source.SourceType.ToString(),
-                        Title = cleanTitle,
+                        Title = finalTitle,
                         Url = raw.Url,
                         CanonicalUrl = canonicalUrl,
                         Author = raw.Author,
@@ -81,9 +96,9 @@ public class SourceIngestionService
                         DiscoveredAt = DateTimeOffset.UtcNow,
                         ContentHash = contentHash,
                         TextContent = cleanText,
-                        Language = raw.Language,
+                        Language = raw.Language ?? "en",
                         Category = raw.Category ?? source.Category,
-                        Summary = _normalizer.CleanText(raw.Summary),
+                        Summary = finalSummary,
                         IsDuplicate = false
                     };
 

@@ -7,6 +7,8 @@ using Signal.Infrastructure.Persistence;
 using Signal.Infrastructure.Providers;
 using Signal.Infrastructure.Providers.AI;
 using Signal.Infrastructure.Providers.Telegram;
+using Signal.Infrastructure.Providers.Translation;
+using Signal.Infrastructure.Providers.Video;
 using Signal.Infrastructure.Providers.YouTube;
 
 namespace Signal.Infrastructure;
@@ -81,6 +83,14 @@ public static class DependencyInjection
         // YouTube Provider
         services.AddHttpClient<YouTubeSourceProvider>();
         services.AddScoped<ISourceProvider, YouTubeSourceProvider>();
+
+        // Translation Service (Free multi-language translation for CN/JP/US)
+        services.AddHttpClient<FreeTranslationService>();
+        services.AddScoped<ITranslationService, FreeTranslationService>();
+
+        // Video & Reel Inspection Service (Legitimacy & Transcript analysis)
+        services.AddHttpClient<VideoInspectionService>();
+        services.AddScoped<IVideoInspectionService, VideoInspectionService>();
 
         // Google Sheets Integration
         services.AddHttpClient<GoogleSheetApprovalService>();

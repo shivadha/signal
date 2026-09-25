@@ -12,6 +12,8 @@ public record AIAnalysisResult
     public string? OpportunityType { get; init; }
     public string? ExtractedValue { get; init; }
     public string? Summary { get; init; }
+    public bool IsTool { get; init; }
+    public string? GitHubRepoUrl { get; init; }
     public List<string> Claims { get; init; } = new();
 }
 
@@ -30,4 +32,6 @@ public interface ITelegramProvider
 public interface IGoogleSheetsProvider
 {
     Task<GoogleSheetSyncResult> SyncOpportunityAsync(Opportunity opportunity, CancellationToken cancellationToken = default);
+    Task<GoogleSheetSyncResult> SyncToolRepoAsync(string repoTitle, string repoUrl, string? description, string? category, double relevanceScore, CancellationToken cancellationToken = default);
 }
+

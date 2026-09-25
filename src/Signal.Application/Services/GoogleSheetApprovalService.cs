@@ -161,4 +161,83 @@ public class GoogleSheetApprovalService : IGoogleSheetsProvider
 
         return syncedCount;
     }
+
+    public async Task<GoogleSheetSyncResult> SyncToolRepoAsync(
+        string repoTitle,
+        string repoUrl,
+        string? description,
+        string? category,
+        double relevanceScore,
+        CancellationToken cancellationToken = default)
+    {
+        var isEnabled = bool.TryParse(_config["GOOGLE_SHEETS_ENABLED"], out var enabled) && enabled;
+        var webhookUrl = _config["GOOGLE_APPS_SCRIPT_URL"];
+
+        var payload = new
+        {
+            sheetName = "Tools",
+            type = "tool",
+            isRepo = true,
+            title = repoTitle,
+            url = repoUrl,
+            canonicalUrl = repoUrl,
+            category = category ?? "Developer Tools",
+            description = description ?? repoTitle,
+            relevanceScore = relevanceScore,
+            status = "Saved",
+            notes = "Saved via Telegram /tools"
+        };
+
+        var payloadJson = JsonSerializer.Serialize(payload);
+
+        var record = new GoogleSheetRecord
+        {
+            SheetName = "Tools",
+            PayloadJson = payloadJson,
+            Status = SyncStatus.PendingSync,
+            RetryCount = 0
+        };
+
+        _dbContext.GoogleSheetRecords.Add(record);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        if (!isEnabled || string.IsNullOrWhiteSpace(webhookUrl))
+        {
+            _logger.LogInformation("Google Sheets integration disabled. Tool repo recorded locally in offline queue.");
+            return new GoogleSheetSyncResult(true, null, "Saved locally (Google Sheets offline/disabled)");
+        }
+
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync(webhookUrl, payload, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                var doc = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+                var rowIdx = doc.TryGetProperty("row", out var r) ? r.GetInt32() : (int?)null;
+
+                record.Status = SyncStatus.Synced;
+                record.RowIndex = rowIdx;
+                record.SyncedAt = DateTimeOffset.UtcNow;
+                await _dbContext.SaveChangesAsync(cancellationToken);
+
+                _logger.LogInformation("Successfully synced Tool Repo '{Title}' to Google Sheets 'Tools' tab (Row #{Row})",
+                    repoTitle, rowIdx);
+
+                return new GoogleSheetSyncResult(true, rowIdx, null);
+            }
+
+            var err = await response.Content.ReadAsStringAsync(cancellationToken);
+            record.ErrorMessage = err;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return new GoogleSheetSyncResult(false, null, $"HTTP Error: {response.StatusCode} - {err}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to connect to Google Sheets webhook for tool repo. Will retry in background.");
+            record.ErrorMessage = ex.Message;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return new GoogleSheetSyncResult(false, null, ex.Message);
+        }
+    }
 }
+
