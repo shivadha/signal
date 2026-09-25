@@ -1,9 +1,14 @@
 using Signal.Infrastructure;
+using Signal.Infrastructure.Common;
 using Signal.Infrastructure.Data;
 using Signal.Infrastructure.Persistence;
 using Signal.Worker;
 
+EnvLoader.Load();
+
 var builder = Host.CreateApplicationBuilder(args);
+builder.Configuration.AddEnvironmentVariables();
+
 
 // Add Infrastructure & Application services
 builder.Services.AddInfrastructure(builder.Configuration);

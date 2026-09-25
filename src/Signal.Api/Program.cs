@@ -3,14 +3,20 @@ using Signal.Application.Common.Interfaces;
 using Signal.Application.Common.Models;
 using Signal.Application.Services;
 using Signal.Infrastructure;
+using Signal.Infrastructure.Common;
 using Signal.Infrastructure.Data;
 using Signal.Infrastructure.Persistence;
 using Signal.Infrastructure.Providers.Telegram;
 
+
+EnvLoader.Load();
+
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddEnvironmentVariables();
 
 // Add Infrastructure & Application Services
 builder.Services.AddInfrastructure(builder.Configuration);
+
 builder.Services.AddEndpointsApiExplorer();
 
 var app = builder.Build();
